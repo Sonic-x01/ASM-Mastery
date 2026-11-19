@@ -1,5 +1,7 @@
 # ASM Mastery for Reverse Engineers — Assembly من الصفر للاحتراف 🔬
 
+**🌐 الموقع: https://sonic-x01.github.io/ASM-Mastery/**
+
 كورس Assembly تفاعلي بالعربي (RTL)، من أول الـ bits والـ registers لحد الـ PEB walk والـ shellcode والـ unpacking، ومصمم بالكامل لـ **الـ Reverse Engineering وتحليل الـ Malware**: مش بس تكتب Assembly، لكن تقرا اللي الـ compilers بيطلعوه وتفك اللي الـ malware بيخبّيه.
 
 > الأكواد والتعليقات والمخرجات **بالإنجليزية**، والشرح **بالعربي**. الـ syntax: **NASM / Intel**. المعمارية الأساسية **x86-64**، مع **x86 32-bit** و**ARM64**.
