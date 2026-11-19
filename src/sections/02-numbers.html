@@ -1,0 +1,337 @@
+      <section class="section" id="s02" data-part="الجزء 1 · الآلة من جوه" data-nav="الأرقام وتمثيل البيانات" data-icon="🔢" data-keywords="binary hex hexadecimal decimal two's complement signed unsigned byte word dword qword nibble endianness little endian big endian ascii utf-16 wide string sign extension zero extension ieee 754 float double llp64 lp64">
+        <div class="section-head">
+          <span class="section-index">02</span>
+          <div>
+            <p class="eyebrow">المرحلة الثانية · لغة الآلة</p>
+            <h2>الأرقام وتمثيل البيانات: إزاي الـ CPU شايف كل حاجة</h2>
+            <p class="lede">في الذاكرة مفيش "رقم سالب" ولا "حرف" ولا "عنوان" — فيه <b>bits</b> بس. نفس الـ 4 bytes ممكن تكون رقم موجب، أو سالب، أو 4 حروف، أو float، أو pointer — <b>المعنى بييجي من الـ instruction اللي بتستخدمها</b>. المرحلة دي هي اللي هتخليك تبص على hexdump وتشوف معنى.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">ليه Hex؟ <span class="tag">1 hex digit = 4 bits</span></h3>
+        <p>الـ binary طويل جدًا للبني آدمين، والـ decimal مش بيتقسم على حدود الـ bits. الـ <b>hexadecimal</b> (أساس 16) هو الحل: كل رقم hex = <b>4 bits بالظبط</b> (nibble)، وكل byte = <b>رقمين hex</b>. عشان كده كل الأدوات (x64dbg، IDA، hex editors) بتتكلم hex.</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>hex</th><th>binary</th><th>dec</th><th></th><th>hex</th><th>binary</th><th>dec</th></tr></thead>
+            <tbody>
+              <tr><td><code>0</code></td><td><code>0000</code></td><td>0</td><td></td><td><code>8</code></td><td><code>1000</code></td><td>8</td></tr>
+              <tr><td><code>1</code></td><td><code>0001</code></td><td>1</td><td></td><td><code>9</code></td><td><code>1001</code></td><td>9</td></tr>
+              <tr><td><code>2</code></td><td><code>0010</code></td><td>2</td><td></td><td><code>A</code></td><td><code>1010</code></td><td>10</td></tr>
+              <tr><td><code>3</code></td><td><code>0011</code></td><td>3</td><td></td><td><code>B</code></td><td><code>1011</code></td><td>11</td></tr>
+              <tr><td><code>4</code></td><td><code>0100</code></td><td>4</td><td></td><td><code>C</code></td><td><code>1100</code></td><td>12</td></tr>
+              <tr><td><code>5</code></td><td><code>0101</code></td><td>5</td><td></td><td><code>D</code></td><td><code>1101</code></td><td>13</td></tr>
+              <tr><td><code>6</code></td><td><code>0110</code></td><td>6</td><td></td><td><code>E</code></td><td><code>1110</code></td><td>14</td></tr>
+              <tr><td><code>7</code></td><td><code>0111</code></td><td>7</td><td></td><td><code>F</code></td><td><code>1111</code></td><td>15</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>التحويل بين hex وbinary مجرد استبدال كل nibble: <code>0xB7</code> = <code>1011 0111</code>. ولـ decimal: <code>0xB7 = 11×16 + 7 = 183</code>. والعكس: اقسم على 16 وخد البواقي. احفظ القيم دي لأنك هتشوفها كل يوم: <code>0xFF = 255</code>، <code>0x100 = 256</code>، <code>0x7F = 127</code>، <code>0x80 = 128</code>، <code>0x400 = 1024</code>، <code>0x1000 = 4096</code> (حجم الـ page)، <code>0xFFFF = 65535</code>.</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الأداة / اللغة</th><th>بتكتب الرقم 26 hex إزاي</th></tr></thead>
+            <tbody>
+              <tr><td>NASM (الكورس)</td><td><code>0x1A</code> أو <code>1Ah</code> أو <code>0h1A</code> — و<code>0b11010</code> للـ binary و<code>'A'</code> للحرف</td></tr>
+              <tr><td>IDA / MASM</td><td><code>1Ah</code> — لو بدأ بحرف بيتحط قدامه 0: <code>0FFh</code></td></tr>
+              <tr><td>x64dbg</td><td><code>1A</code> (كل الأرقام hex بشكل افتراضي!)</td></tr>
+              <tr><td>gdb / objdump / C</td><td><code>0x1a</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn"><span class="ci">⚠️</span><div><strong>فخ x64dbg</strong><p>في x64dbg لو كتبت <code>10</code> في أي خانة، ده <b>16</b> مش عشرة! كل حاجة hex. لو عايز decimal اكتب <code>.10</code>. غلطة كلاسيكية لما تعمل breakpoint أو تعدل قيمة.</p></div></div>
+
+        <div class="widget" data-widget="conv"></div>
+
+        <h3 class="sub">الأحجام: من الـ bit للـ qword <span class="tag">byte · word · dword · qword</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الاسم</th><th>bits</th><th>NASM</th><th>unsigned</th><th>signed</th><th>C (Windows x64)</th><th>C (Linux x64)</th></tr></thead>
+            <tbody>
+              <tr><td><b>byte</b></td><td>8</td><td><code>db</code> / <code>byte</code></td><td>0 → 255</td><td>−128 → 127</td><td><code>char</code></td><td><code>char</code></td></tr>
+              <tr><td><b>word</b></td><td>16</td><td><code>dw</code> / <code>word</code></td><td>0 → 65,535</td><td>−32,768 → 32,767</td><td><code>short</code>، <code>wchar_t</code></td><td><code>short</code></td></tr>
+              <tr><td><b>dword</b></td><td>32</td><td><code>dd</code> / <code>dword</code></td><td>0 → 4,294,967,295</td><td>−2,147,483,648 → 2,147,483,647</td><td><code>int</code>، <b><code>long</code></b>، <code>DWORD</code></td><td><code>int</code></td></tr>
+              <tr><td><b>qword</b></td><td>64</td><td><code>dq</code> / <code>qword</code></td><td>0 → 1.8×10¹⁹</td><td>±9.2×10¹⁸</td><td><code>long long</code>، pointer، <code>size_t</code></td><td><b><code>long</code></b>، pointer، <code>size_t</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>Windows ≠ Linux في حجم long</strong><p>Windows x64 بيستخدم نموذج <b>LLP64</b>: <code>long</code> = 4 bytes. Linux بيستخدم <b>LP64</b>: <code>long</code> = 8 bytes. والـ <code>wchar_t</code> = 2 bytes على Windows (UTF-16) و4 على Linux. لما تعمل struct recovery لـ malware بتاع Windows افتكر ده. وليه "word" = 16 bit حتى على 64-bit؟ لأن Intel سمّت الأحجام أيام الـ 8086 وفضلت ثابتة.</p></div></div>
+
+        <h3 class="sub">الأرقام السالبة: Two's Complement <span class="tag">أهم فكرة في المرحلة</span></h3>
+        <p>الـ CPU بيمثل السالب بطريقة اسمها <b>two's complement</b>: عشان تجيب <code>−x</code>، <b>اقلب كل الـ bits وزوّد 1</b>. مثال بـ 8 bits:</p>
+        <div class="mem">
+          <div class="mem-title">−5 في byte واحد</div>
+          <div class="mem-row"><span class="addr">5</span><span class="val">0000 0101</span><span class="what">الرقم الموجب = 0x05</span></div>
+          <div class="mem-row"><span class="addr">NOT</span><span class="val">1111 1010</span><span class="what">اقلب كل الـ bits = 0xFA</span></div>
+          <div class="mem-row hl"><span class="addr">+1</span><span class="val">1111 1011</span><span class="what">زوّد 1 = 0xFB = −5 ✓</span></div>
+          <div class="mem-cap">جرّب في المحوّل اللي فوق: اكتب -5 واختار 8-bit — هتلاقي 0xFB.</div>
+        </div>
+        <p>ليه الطريقة دي عبقرية؟ لأن <b>نفس دائرة الجمع</b> بتشتغل للـ signed والـ unsigned: <code>0xFB + 0x05 = 0x100</code>، والـ byte مبيشيلش غير 8 bits فالنتيجة <code>0x00</code> = صفر ✓. الـ CPU <b>مبيعرفش</b> الرقم signed ولا unsigned — هو بيجمع bits وخلاص، و<b>إنت</b> (والـ instructions اللي بعدها) اللي بتفسّر.</p>
+
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 400" role="img" aria-label="دائرة two's complement لـ 4 bits">
+            <g transform="translate(0,12)">
+              <circle cx="250" cy="190" r="163" class="d-dim"/>
+              <circle cx="250" cy="190" r="97" class="d-dim"/>
+              <circle cx="250.0" cy="55.0" r="19" class="d-box"/><text x="250.0" y="59.0" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">0000</text><text x="250.0" y="11.0" text-anchor="middle" class="d-ts d-acc">0</text><text x="250.0" y="119.0" text-anchor="middle" class="d-ts d-grn">0</text>
+              <circle cx="301.7" cy="65.3" r="19" class="d-box"/><text x="301.7" y="69.3" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">0001</text><text x="320.0" y="24.9" text-anchor="middle" class="d-ts d-acc">1</text><text x="278.7" y="124.7" text-anchor="middle" class="d-ts d-grn">+1</text>
+              <circle cx="345.5" cy="94.5" r="19" class="d-box"/><text x="345.5" y="98.5" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">0010</text><text x="379.4" y="64.6" text-anchor="middle" class="d-ts d-acc">2</text><text x="303.0" y="141.0" text-anchor="middle" class="d-ts d-grn">+2</text>
+              <circle cx="374.7" cy="138.3" r="19" class="d-box"/><text x="374.7" y="142.3" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">0011</text><text x="419.1" y="124.0" text-anchor="middle" class="d-ts d-acc">3</text><text x="319.3" y="165.3" text-anchor="middle" class="d-ts d-grn">+3</text>
+              <circle cx="385.0" cy="190.0" r="19" class="d-box"/><text x="385.0" y="194.0" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">0100</text><text x="433.0" y="194.0" text-anchor="middle" class="d-ts d-acc">4</text><text x="325.0" y="194.0" text-anchor="middle" class="d-ts d-grn">+4</text>
+              <circle cx="374.7" cy="241.7" r="19" class="d-box"/><text x="374.7" y="245.7" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">0101</text><text x="419.1" y="264.0" text-anchor="middle" class="d-ts d-acc">5</text><text x="319.3" y="222.7" text-anchor="middle" class="d-ts d-grn">+5</text>
+              <circle cx="345.5" cy="285.5" r="19" class="d-box"/><text x="345.5" y="289.5" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">0110</text><text x="379.4" y="323.4" text-anchor="middle" class="d-ts d-acc">6</text><text x="303.0" y="247.0" text-anchor="middle" class="d-ts d-grn">+6</text>
+              <circle cx="301.7" cy="314.7" r="19" class="d-box"/><text x="301.7" y="318.7" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">0111</text><text x="320.0" y="363.1" text-anchor="middle" class="d-ts d-acc">7</text><text x="278.7" y="263.3" text-anchor="middle" class="d-ts d-grn">+7</text>
+              <circle cx="250.0" cy="325.0" r="19" class="d-box5"/><text x="250.0" y="329.0" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">1000</text><text x="250.0" y="377.0" text-anchor="middle" class="d-ts d-acc">8</text><text x="250.0" y="269.0" text-anchor="middle" class="d-ts d-red">-8</text>
+              <circle cx="198.3" cy="314.7" r="19" class="d-box5"/><text x="198.3" y="318.7" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">1001</text><text x="180.0" y="363.1" text-anchor="middle" class="d-ts d-acc">9</text><text x="221.3" y="263.3" text-anchor="middle" class="d-ts d-red">-7</text>
+              <circle cx="154.5" cy="285.5" r="19" class="d-box5"/><text x="154.5" y="289.5" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">1010</text><text x="120.6" y="323.4" text-anchor="middle" class="d-ts d-acc">10</text><text x="197.0" y="247.0" text-anchor="middle" class="d-ts d-red">-6</text>
+              <circle cx="125.3" cy="241.7" r="19" class="d-box5"/><text x="125.3" y="245.7" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">1011</text><text x="80.9" y="264.0" text-anchor="middle" class="d-ts d-acc">11</text><text x="180.7" y="222.7" text-anchor="middle" class="d-ts d-red">-5</text>
+              <circle cx="115.0" cy="190.0" r="19" class="d-box5"/><text x="115.0" y="194.0" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">1100</text><text x="67.0" y="194.0" text-anchor="middle" class="d-ts d-acc">12</text><text x="175.0" y="194.0" text-anchor="middle" class="d-ts d-red">-4</text>
+              <circle cx="125.3" cy="138.3" r="19" class="d-box5"/><text x="125.3" y="142.3" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">1101</text><text x="80.9" y="124.0" text-anchor="middle" class="d-ts d-acc">13</text><text x="180.7" y="165.3" text-anchor="middle" class="d-ts d-red">-3</text>
+              <circle cx="154.5" cy="94.5" r="19" class="d-box5"/><text x="154.5" y="98.5" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">1110</text><text x="120.6" y="64.6" text-anchor="middle" class="d-ts d-acc">14</text><text x="197.0" y="141.0" text-anchor="middle" class="d-ts d-red">-2</text>
+              <circle cx="198.3" cy="65.3" r="19" class="d-box5"/><text x="198.3" y="69.3" text-anchor="middle" class="d-tx" style="font-size:10.5px;fill:var(--text)">1111</text><text x="180.0" y="24.9" text-anchor="middle" class="d-ts d-acc">15</text><text x="221.3" y="124.7" text-anchor="middle" class="d-ts d-red">-1</text>
+              <path d="M261.7,248.9 L284.1,361.6" class="d-ar-vio d-dash" style="stroke:#ff6b81;stroke-width:2.2"/>
+              <path d="M238.3,131.1 L215.9,18.4" class="d-ar-amb d-dash" style="stroke-width:2.2"/>
+            </g>
+            <text x="975" y="60" class="d-tb ar">4 bits = 16 قيمة بس، مرسومة على دايرة</text>
+            <text x="975" y="92" class="d-ts ar">الرقم الأزرق برا = تفسير unsigned (0 → 15)</text>
+            <text x="975" y="118" class="d-ts ar">الأخضر والأحمر جوه = تفسير signed (−8 → +7)</text>
+            <text x="975" y="160" class="d-ts ar">الجمع = لف مع عقارب الساعة، والطرح = عكسها</text>
+            <text x="975" y="205" class="d-tb ar" style="fill:#ffb454">الخط البرتقالي: 15 → 0</text>
+            <text x="975" y="230" class="d-ts ar">عدّيته؟ ده unsigned overflow → الـ CPU بيرفع CF</text>
+            <text x="975" y="275" class="d-tb ar" style="fill:#ff8d9d">الخط الأحمر: +7 → −8</text>
+            <text x="975" y="300" class="d-ts ar">عدّيته؟ ده signed overflow → الـ CPU بيرفع OF</text>
+            <text x="975" y="345" class="d-ts ar">أعلى bit = 1 ⇐ الرقم سالب لو اتفسّر signed (SF)</text>
+          </svg>
+          <figcaption>نفس الـ bits، تفسيرين. نفس الفكرة بالظبط مع 8 و16 و32 و64 bit، بس الدايرة أكبر: في الـ byte، الحد الأحمر بين <code>0x7F</code> (127) و<code>0x80</code> (−128). الدايرة دي هي اللي هتفهّمك الـ flags في المرحلة 07.</figcaption>
+        </figure>
+
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🔑</div><h4>قواعد تحفظها</h4><p><code>−1</code> = كل الـ bits بواحد: <code>0xFF</code> / <code>0xFFFF</code> / <code>0xFFFFFFFF</code> / <code>0xFFFFFFFFFFFFFFFF</code>. أعلى bit = 1 ⇐ سالب (لو signed). أصغر سالب: <code>0x80…00</code>، وماعندوش موجب مقابل له (<code>−(−128)</code> في byte = <code>−128</code> تاني!).</p></div>
+          <div class="card reveal"><div class="ico">🕵️</div><h4>في الـ disassembly</h4><p>لما تشوف <code>cmp eax, 0FFFFFFFFh</code> فده <code>eax == -1</code>. و<code>add rsp, 0FFFFFFFFFFFFFFF0h</code> = <code>sub rsp, 16</code>. و<code>and rsp, 0FFFFFFFFFFFFFFF0h</code> = "قرّب rsp لمضاعف 16". IDA أحيانًا بيعرض السالب كـ hex كبير — اضغط <kbd>-</kbd> عليه عشان يقلبه.</p></div>
+        </div>
+
+        <h3 class="sub">التكبير: Sign Extension و Zero Extension <span class="tag">movsx / movzx</span></h3>
+        <p>لما تنقل رقم صغير لمكان أكبر (byte → dword مثلًا)، لازم تقرر تملا الـ bits الجديدة بإيه:</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>byte</th><th>zero-extend → dword (unsigned)</th><th>sign-extend → dword (signed)</th></tr></thead>
+            <tbody>
+              <tr><td><code>0x05</code> (5)</td><td><code>0x00000005</code> = 5</td><td><code>0x00000005</code> = 5</td></tr>
+              <tr><td><code>0xF0</code> (240 أو −16)</td><td><code>0x000000F0</code> = 240</td><td><code>0xFFFFFFF0</code> = −16</td></tr>
+              <tr><td><code>0x80</code> (128 أو −128)</td><td><code>0x00000080</code> = 128</td><td><code>0xFFFFFF80</code> = −128</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Zero-extension بتملا أصفار، وsign-extension بتنسخ <b>أعلى bit</b> في كل الخانات الجديدة. الـ compiler بيختار حسب النوع في C: <code>unsigned char</code> ← <code>movzx</code>، <code>char</code> (signed) ← <code>movsx</code>. يعني لما تشوف <code>movsx</code> في الـ disassembly تعرف إن المتغير الأصلي <b>signed</b> — معلومة ذهبية في استرجاع الأنواع. جرّبها في المعمل:</p>
+        <asm-lab id="s02-lab1" title="نفس الـ byte، تكبيرين مختلفين">
+extend:
+    mov al, 0xF0        ; al = 1111 0000
+    movzx ebx, al       ; zero-extend: ebx = 0x000000F0 (240)
+    movsx ecx, al       ; sign-extend: ecx = 0xFFFFFFF0 (-16)
+    movsx rdx, al       ; sign-extend to 64-bit
+    mov al, 0x70        ; top bit is 0 this time
+    movsx esi, al       ; = 0x00000070, same as movzx
+    ret
+</asm-lab>
+
+        <h3 class="sub">Endianness: ليه الأرقام بتبان مقلوبة <span class="tag">little-endian</span></h3>
+        <p>لما رقم أكبر من byte يتخزن في الذاكرة، لازم الـ bytes بتاعته تترتب بترتيب ما. x86 بيستخدم <b>little-endian</b>: <b>الـ byte الأصغر (least significant) في العنوان الأصغر</b>. فالـ dword <code>0x12345678</code> بيتخزن كده:</p>
+        <div class="hexdump"><span class="o">00403000</span>  <span class="m h">78</span> <span class="h">56 34 12</span>                <span class="a">xV4.</span>
+<span class="o">          </span>  ↑ الـ byte ده = 0x78 = أصغر جزء من الرقم</div>
+        <p>وده بيأثر على كل حاجة: قراية الـ hexdumps، الـ machine code (<code>mov eax, 0x12345678</code> = <code>B8 78 56 34 12</code>)، الـ shellcode، والـ network (اللي بيستخدم <b>big-endian</b> — عشان كده الـ malware بيستخدم <code>htons</code>/<code>htonl</code> أو <code>bswap</code> قبل ما يبعت port أو IP). جرّب:</p>
+        <div class="widget" data-widget="endian"></div>
+        <div class="callout tip"><span class="ci">💡</span><div><strong>Stack strings</strong><p>الـ malware كتير بيبني strings على الـ stack عشان أداة <code>strings</code> متلاقيهاش: <code>mov rax, 6578652E646D63h</code> ثم <code>mov [rsp+20h], rax</code>. اقرا الـ bytes من اليمين للشمال: <code>63 6D 64 2E 65 78 65</code> = <code>"cmd.exe"</code>. بسبب الـ little-endian، الـ string بتبان مقلوبة جوه الرقم.</p></div></div>
+
+        <h3 class="sub">النصوص: ASCII و UTF-16 <span class="tag">strings in memory</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الحرف</th><th>hex</th><th>ملاحظة تستخدمها</th></tr></thead>
+            <tbody>
+              <tr><td><code>'\0'</code> (NUL)</td><td><code>0x00</code></td><td>نهاية الـ C string</td></tr>
+              <tr><td><code>'\n'</code> / <code>'\r'</code></td><td><code>0x0A</code> / <code>0x0D</code></td><td>Windows بيستخدم <code>0D 0A</code> في الملفات</td></tr>
+              <tr><td><code>' '</code> (space)</td><td><code>0x20</code></td><td></td></tr>
+              <tr><td><code>'0'</code> … <code>'9'</code></td><td><code>0x30</code> … <code>0x39</code></td><td>الرقم = الحرف − <code>0x30</code> (<code>sub al, '0'</code>)</td></tr>
+              <tr><td><code>'A'</code> … <code>'Z'</code></td><td><code>0x41</code> … <code>0x5A</code></td><td></td></tr>
+              <tr><td><code>'a'</code> … <code>'z'</code></td><td><code>0x61</code> … <code>0x7A</code></td><td>الفرق عن الكبير = <code>0x20</code> = bit 5 بس! <code>or al, 20h</code> = lowercase</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Windows داخليًا بيستخدم <b>UTF-16LE</b> ("wide strings"): كل حرف <b>2 bytes</b>. فالـ string <code>L"cmd"</code> في الذاكرة = <code>63 00 6D 00 64 00 00 00</code>. أي API بتنتهي بـ <b>W</b> (زي <code>CreateFileW</code>) بتاخد wide strings، والـ <b>A</b> بتاخد ASCII/ANSI. في الـ hexdump هتشوف حرف-صفر-حرف-صفر. أدوات زي <code>strings -el</code> و<b>FLOSS</b> بتدور على النوعين.</p>
+
+        <h3 class="sub">شوف الكلام ده بيتنفذ <span class="tag">RUN</span></h3>
+        <p>البرنامج ده بيقرا byte واحد من رقم متخزن في الذاكرة، ويطبع نفس الـ 8 bytes مرة unsigned ومرة signed. (بنستخدم مكتبة <code>io.inc</code> للطباعة — هنشرحها في المرحلة 05.)</p>
+        <nasm-example file="representation.asm" io>
+section .data
+num:   dd 0x12345678          ; stored as 78 56 34 12
+neg1:  dq -1                  ; stored as FF FF FF FF FF FF FF FF
+wide:  dw 'c', 'm', 'd', 0    ; UTF-16: 63 00 6D 00 64 00 00 00
+
+section .text
+global _start
+_start:
+    movzx edi, byte [rel num]       ; the FIRST byte in memory
+    call print_hex                  ; 0x78 -> little-endian!
+    call print_nl
+
+    mov rdi, [rel neg1]
+    call print_uint                 ; the bits read as unsigned
+    call print_nl
+    call print_int                  ; the SAME bits read as signed
+    call print_nl
+
+    movzx edi, word [rel wide + 2]  ; second UTF-16 character
+    call print_char                 ; 'm'
+    call print_nl
+    xor edi, edi
+    call exit
+</nasm-example>
+
+        <h3 class="sub">لمحة: الأرقام العشرية (float/double) <span class="tag">IEEE-754</span></h3>
+        <p>الـ floats مش two's complement — ليها شكل تاني (<b>IEEE-754</b>): <b>sign</b> + <b>exponent</b> + <b>mantissa</b>. مش محتاج تحسبها بإيدك، بس محتاج <b>تعرف شكلها</b> لما تشوفها كثوابت في الـ binary:</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>القيمة</th><th>float (32-bit)</th><th>double (64-bit)</th></tr></thead>
+            <tbody>
+              <tr><td>1.0</td><td><code>0x3F800000</code></td><td><code>0x3FF0000000000000</code></td></tr>
+              <tr><td>−1.0</td><td><code>0xBF800000</code></td><td><code>0xBFF0000000000000</code></td></tr>
+              <tr><td>0.5</td><td><code>0x3F000000</code></td><td><code>0x3FE0000000000000</code></td></tr>
+              <tr><td>2.0</td><td><code>0x40000000</code></td><td><code>0x4000000000000000</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>لو شفت <code>mov eax, 3F800000h</code> جنب <code>movd xmm0, eax</code> — ده <code>1.0f</code>. وأي dword بيبدأ بـ <code>3F</code> أو <code>40</code> أو <code>BF</code> أو <code>C0</code> وجاي من xmm غالبًا float. التفاصيل في مرحلة الـ SIMD.</p>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 02</h3></div>
+
+          <quiz id="s02-q1" answer="2">
+            <q><code>0x2F</code> بالـ decimal = ؟</q>
+            <o>29</o>
+            <o>45</o>
+            <o>47</o>
+            <o>215</o>
+            <good>2×16 + 15 = 47.</good>
+            <bad>الخانة اليمين × 1، والشمال × 16. و F = 15.</bad>
+          </quiz>
+          <quiz id="s02-q2" answer="1">
+            <q>إيه تمثيل <code>−3</code> في byte (two's complement)؟</q>
+            <o><code>0x83</code></o>
+            <o><code>0xFD</code></o>
+            <o><code>0xFC</code></o>
+            <o><code>0x03</code></o>
+            <good>3 = 0000 0011 → اقلب = 1111 1100 → +1 = 1111 1101 = 0xFD. (0x83 ده طريقة "sign-magnitude" اللي الـ CPU مش بيستخدمها.)</good>
+            <bad>اقلب كل bits الـ 3 وبعدين زوّد 1.</bad>
+          </quiz>
+          <quiz id="s02-q3" answer="3">
+            <q>الـ byte <code>0x9C</code> لو اتفسّر signed قيمته كام؟</q>
+            <o>156</o>
+            <o>−28</o>
+            <o>−156</o>
+            <o>−100</o>
+            <good>0x9C = 156 unsigned. أعلى bit = 1 فهو سالب: 156 − 256 = −100.</good>
+            <bad>القاعدة السريعة: لو أعلى bit = 1، القيمة signed = unsigned − 2ⁿ (هنا n = 8).</bad>
+          </quiz>
+          <quiz id="s02-q4" answer="0">
+            <q>الـ dword <code>0xCAFEBABE</code> متخزن في الذاكرة عند <code>0x1000</code> على x86. الـ byte عند <code>0x1000</code> بالظبط = ؟</q>
+            <o><code>0xBE</code></o>
+            <o><code>0xCA</code></o>
+            <o><code>0xBA</code></o>
+            <o><code>0xFE</code></o>
+            <good>little-endian: الأصغر الأول. الترتيب في الذاكرة: BE BA FE CA.</good>
+            <bad>x86 little-endian: آخر byte في الرقم (الأصغر) بيتخزن أول.</bad>
+          </quiz>
+          <quiz id="s02-q5" answer="2">
+            <q>byte قيمته <code>0xF6</code> اتعمله <code>movsx</code> لـ dword. النتيجة؟</q>
+            <o><code>0x000000F6</code></o>
+            <o><code>0xF6000000</code></o>
+            <o><code>0xFFFFFFF6</code></o>
+            <o><code>0x0000FFF6</code></o>
+            <good>أعلى bit في 0xF6 = 1، فالـ sign extension بتملا الـ 24 bit الجديدة بواحد: 0xFFFFFFF6 = −10.</good>
+            <bad>movsx بتنسخ أعلى bit. أعلى bit في 0xF6 كام؟</bad>
+          </quiz>
+          <quiz id="s02-q6" answer="1">
+            <q>في binary بتاع Windows x64، struct فيها <code>long</code> و<code>long long</code> و pointer. أحجامهم بالترتيب؟</q>
+            <o>8، 8، 8</o>
+            <o>4، 8، 8</o>
+            <o>4، 4، 8</o>
+            <o>8، 16، 8</o>
+            <good>LLP64: long = 4 bytes، long long = 8، الـ pointer = 8. على Linux الـ long بيبقى 8.</good>
+            <bad>Windows بيستخدم LLP64 — الـ long فضل 32-bit.</bad>
+          </quiz>
+          <quiz id="s02-q7" answer="3">
+            <q>شفت في hexdump: <code>68 00 74 00 74 00 70 00</code>. ده غالبًا إيه؟</q>
+            <o>أرقام 16-bit عشوائية</o>
+            <o>machine code</o>
+            <o>ASCII string "h.t.t.p."</o>
+            <o>UTF-16LE (wide) string = <code>L"http"</code></o>
+            <good>حرف ثم صفر = wide string بتاع Windows. 68 74 74 70 = "http". غالبًا URL للـ C2!</good>
+            <bad>بص على النمط: byte قيمته حرف، وبعده 00، وهكذا.</bad>
+          </quiz>
+          <quiz id="s02-q8" answer="0">
+            <q>الفرق بين <code>'a'</code> و<code>'A'</code> في ASCII؟</q>
+            <o><code>0x20</code> (bit رقم 5 بس)</o>
+            <o><code>0x10</code></o>
+            <o><code>0x26</code></o>
+            <o>مفيش علاقة ثابتة</o>
+            <good>0x61 − 0x41 = 0x20. عشان كده <code>xor al, 20h</code> بيقلب حالة الحرف، وبعض الـ malware بيعمل hashing لأسماء الـ APIs بعد ما يحوّلها لـ uppercase بـ <code>and al, 0DFh</code>.</good>
+            <bad>'A' = 0x41 و 'a' = 0x61.</bad>
+          </quiz>
+          <quiz id="s02-q9" answer="2">
+            <q>شفت <code>mov dword ptr [rbp-4], 3F800000h</code>. أغلب الظن إن المتغير ده:</q>
+            <o>pointer</o>
+            <o>int قيمته مليار</o>
+            <o>float قيمته 1.0</o>
+            <o>string</o>
+            <good>0x3F800000 هو تمثيل 1.0f في IEEE-754. احفظ الشكل ده.</good>
+            <bad>بص على جدول IEEE-754 في المرحلة.</bad>
+          </quiz>
+          <quiz id="s02-q10" answer="1">
+            <q>أكبر قيمة <b>signed</b> في dword؟</q>
+            <o><code>0xFFFFFFFF</code></o>
+            <o><code>0x7FFFFFFF</code></o>
+            <o><code>0x80000000</code></o>
+            <o><code>0x7FFFFFFE</code></o>
+            <good>0x7FFFFFFF = 2,147,483,647. واحد زيادة = 0x80000000 = أصغر سالب (−2,147,483,648) — ده الـ signed overflow.</good>
+            <bad>أعلى bit لازم يبقى 0 عشان الرقم يفضل موجب.</bad>
+          </quiz>
+
+          <re-task id="s02-re1" title="اقرا الـ hexdump" level="1" answer="0x0BADF00D" norm="int" bits="32">
+            <desc>وأنت بتحلل sample، لقيت في الـ .data الـ 4 bytes دول عند الـ offset بتاع متغير اسمه <code>magic</code> (نوعه dword): <code>0D F0 AD 0B</code>. إيه قيمة <code>magic</code> بالـ hex؟</desc>
+            <hint>little-endian: أول byte في الذاكرة هو آخر byte في الرقم.</hint>
+            <explain>اعكس ترتيب الـ bytes: <code>0B AD F0 0D</code> = <code>0x0BADF00D</code> ("bad food" — magic numbers زي دي بتتحط عشان تتعرف بسهولة في الذاكرة).</explain>
+          </re-task>
+          <re-task id="s02-re2" title="Stack string" level="2" answer="cmd.exe" norm="text">
+            <desc>الـ malware فيه السطر ده: <code>mov rax, 6578652E646D63h</code> وبعده بيخزّن <code>rax</code> على الـ stack ويعامله كـ string. إيه الـ string؟</desc>
+            <hint>اكتب الـ bytes بترتيب الذاكرة (من الأصغر)، وحوّل كل byte لحرف ASCII.</hint>
+            <explain>في الذاكرة: <code>63 6D 64 2E 65 78 65 00</code> = <code>c m d . e x e \0</code> = <code>"cmd.exe"</code>. الـ byte الأعلى (الثامن) = 00 بيعمل الـ NUL terminator ببلاش.</explain>
+          </re-task>
+          <re-task id="s02-re3" title="UTF-16 في الذاكرة" level="1" answer="0x4C" norm="int" bits="8">
+            <desc>الـ wide string <code>L"KILL"</code> متخزنة عند <code>0x5000</code>. إيه قيمة الـ byte عند العنوان <code>0x5004</code>؟ ('A' = 0x41، فـ 'I' = 0x49 و'K' = 0x4B و'L' = 0x4C)</desc>
+            <hint>كل حرف = 2 bytes: الحرف نفسه وبعده 0x00. ارسم الجدول: العنوان ← الـ byte.</hint>
+            <explain>
+              <code>0x5000</code>=<code>4B</code> ('K')، <code>0x5001</code>=<code>00</code>، <code>0x5002</code>=<code>49</code> ('I')، <code>0x5003</code>=<code>00</code>، <code>0x5004</code>=<code>4C</code> ('L')، <code>0x5005</code>=<code>00</code>… الحرف رقم n (من صفر) بيبدأ عند <code>base + 2n</code> — وده نفس الحساب اللي هتشوفه في الـ disassembly: <code>movzx eax, word ptr [rcx+rdx*2]</code>.
+            </explain>
+          </re-task>
+
+          <lab-challenge id="s02-lc1" title="اكتب 'ABCD' في الذاكرة بـ mov واحدة" level="2" maxins="2">
+            <desc>عندك buffer فاضي اسمه <code>buf</code> في الـ .data. اكتب instruction <b>واحدة</b> (+ <code>ret</code>) تخلي الـ bytes في <code>buf</code> = <code>"ABCD"</code> بالظبط — يعني <code>buf[0]='A'</code>… استخدم <code>mov dword [rel buf], ...</code> وفكّر في الـ little-endian. ('A'=0x41، 'B'=0x42، 'C'=0x43، 'D'=0x44)</desc>
+            <starter>
+section .data
+buf: times 8 db 0
+
+section .text
+store:
+    mov dword [rel buf], 0x41424344
+    ret
+</starter>
+            <solution>
+section .data
+buf: times 8 db 0
+
+section .text
+store:
+    mov dword [rel buf], 0x44434241   ; bytes in memory: 41 42 43 44
+    ret
+</solution>
+            <test setup="" expect='str(buf)="ABCD"'/>
+          </lab-challenge>
+        </div>
+      </section>

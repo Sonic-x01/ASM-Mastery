@@ -1,0 +1,356 @@
+      <section class="section" id="s05" data-part="الجزء 1 · الآلة من جوه" data-nav="الأدوات وأول برنامج" data-icon="🛠️" data-keywords="nasm toolchain assemble link ld elf64 win64 gdb x64dbg objdump readelf strace section text data bss db dw dd dq resb times equ $ $$ global _start labels local labels default rel intel att syntax masm gas hello world io.inc">
+        <div class="section-head">
+          <span class="section-index">05</span>
+          <div>
+            <p class="eyebrow">المرحلة الخامسة · عدّة الشغل</p>
+            <h2>الأدوات وأول برنامج: NASM وgdb وx64dbg</h2>
+            <p class="lede">هنا هتكتب أول برامج حقيقية بالكامل: من ملف <code>.asm</code> لـ ELF شغّال، وتفتحه في debugger. وهتتعلم "تشريح" أي برنامج NASM، والفرق بين صيغ الـ Assembly المختلفة اللي هتشوفها في الأدوات.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">تشريح برنامج NASM <span class="tag">anatomy</span></h3>
+        <nasm-example file="hello.asm">
+; hello.asm — Linux x86-64, no libc: talk to the kernel directly
+default rel                     ; RIP-relative addressing by default
+
+section .data                   ; initialised, writable data
+msg:    db "Hello from Assembly!", 10   ; the bytes of the text + '\n'
+len     equ $ - msg             ; assemble-time constant: length = 21
+
+section .text                   ; the code
+global _start                   ; export the entry point for the linker
+_start:
+    mov eax, 1                  ; syscall number: 1 = write
+    mov edi, 1                  ; fd 1 = stdout
+    lea rsi, [msg]              ; pointer to the buffer
+    mov edx, len                ; number of bytes
+    syscall                     ; write(1, msg, len)
+
+    mov eax, 60                 ; syscall number: 60 = exit
+    xor edi, edi                ; status 0
+    syscall                     ; exit(0)
+</nasm-example>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>العنصر</th><th>معناه</th></tr></thead>
+            <tbody>
+              <tr><td><code>; …</code></td><td>comment (NASM). في GAS بيبقى <code>#</code> أو <code>//</code></td></tr>
+              <tr><td><code>section .text / .data / .rodata / .bss</code></td><td>تقسيم الملف: كود، بيانات بقيمة، ثوابت، بيانات بصفر (مبتاخدش مساحة في الملف)</td></tr>
+              <tr><td><code>msg:</code></td><td><b>label</b> = اسم لعنوان. الـ assembler بيحوّله لرقم (العنوان) وقت الـ assembly</td></tr>
+              <tr><td><code>.loop:</code></td><td><b>local label</b> — تابع لآخر label عادي قبله (<code>_start.loop</code>)، فتقدر تكرر <code>.loop</code> في كل دالة</td></tr>
+              <tr><td><code>db / dw / dd / dq</code></td><td>define byte/word/dword/qword: حط القيم دي في الملف بالظبط</td></tr>
+              <tr><td><code>resb 64</code> / <code>resq 4</code></td><td>reserve: احجز مكان (في <code>.bss</code>) من غير قيمة</td></tr>
+              <tr><td><code>times 16 db 0</code></td><td>كرر السطر 16 مرة</td></tr>
+              <tr><td><code>len equ $ - msg</code></td><td><code>equ</code> = ثابت. و<code>$</code> = العنوان الحالي، فالفرق = طول الـ string</td></tr>
+              <tr><td><code>global _start</code></td><td>اعرض الاسم ده للـ linker. <code>_start</code> = نقطة البداية الافتراضية لـ <code>ld</code></td></tr>
+              <tr><td><code>"…"</code> و<code>'…'</code></td><td>نفس الحاجة في NASM، و<b>مفيش</b> escape: <code>"Hi\n"</code> = 4 حروف حرفيًا! استخدم <code>`Hi\n`</code> (backquotes) أو <code>"Hi", 10</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>جرّب <b>⚙ Bytes</b> و<b>🔬 Debug</b> على البرنامج فوق. في الـ Debug، بص على لوحة الـ Memory: هتلاقي الـ <code>.data</code> فيها <code>48 65 6C 6C 6F…</code> = "Hello". ولما تنفّذ أول <code>syscall</code> هيظهر الكلام في STDOUT.</p>
+
+        <h3 class="sub">من الملف للبرنامج <span class="tag">assemble → link → run</span></h3>
+        <div class="pipeline">
+          <div class="stage"><b>hello.asm</b><code>source</code><small>اللي إنت كاتبه</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>nasm -f elf64</b><code>hello.o</code><small>object file: كود + labels لسه من غير عناوين نهائية</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>ld</b><code>hello</code><small>executable ELF: الـ .text عند 0x401000</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>./hello</b><code>exit code</code><small>الـ kernel بيحمّله وبيقفز لـ _start</small></div>
+        </div>
+        
+        <p>🎬 الرحلة كاملة متحركة — من ملف نصي لحد أول instruction بتتنفذ:</p>
+        <div class="explorer" data-scene="build"></div>
+
+        <div class="split-2">
+          <plain-block file="Linux / WSL (Ubuntu)" lang="bash">
+sudo apt install nasm gdb binutils strace   # once
+
+nasm -f elf64 hello.asm -o hello.o          # assemble
+ld hello.o -o hello                         # link
+./hello                                     # run
+echo $?                                     # exit code of last program
+
+objdump -d -M intel hello                   # disassemble (Intel syntax)
+readelf -S hello                            # list the sections
+strace ./hello                              # watch every syscall
+          </plain-block>
+          <plain-block file="Windows (PowerShell)" lang="bash">
+winget install NASM.NASM          # or the installer from nasm.us
+# Option 1 (recommended for this course): run the Linux examples in WSL
+wsl --install -d Ubuntu
+
+# Option 2: native Windows programs (Part 3 of the course)
+nasm -f win64 prog.asm -o prog.obj
+gcc prog.obj -o prog.exe          # MinGW-w64 links with the Windows libs
+.\prog.exe
+          </plain-block>
+        </div>
+        <div class="callout info"><span class="ci">🐧</span><div><strong>ليه Linux للأمثلة رغم إن أغلب الـ malware Windows؟</strong><p>برامج Linux بالـ syscalls المباشرة <b>أبسط بكتير</b> (مفيش imports ولا DLLs ولا PE headers)، فبتركز على الـ Assembly نفسها. الـ instructions والـ registers والـ stack <b>واحدة</b> على النظامين — الفرق في الـ calling convention والـ APIs، وهنغطي Windows بالتفصيل (برامج NASM بتنادي WinAPI، PE، PEB، x86 32-bit). وعندك WSL على جهازك — استخدمه.</p></div></div>
+
+        <h3 class="sub">gdb: الـ debugger على Linux <span class="tag">cheat sheet</span></h3>
+        <plain-block file="gdb session" lang="bash">
+$ gdb -q ./hello
+(gdb) set disassembly-flavor intel     # put this line in ~/.gdbinit
+(gdb) starti                           # stop at the very first instruction
+(gdb) layout asm                       # TUI: code window (layout regs = + registers)
+(gdb) si                               # step one instruction (into calls)
+(gdb) ni                               # step one instruction (over calls)
+(gdb) info registers rax rsi rip       # read registers   (p/x $rax also works)
+(gdb) x/s $rsi                         # examine memory as a string
+(gdb) x/16xb $rsp                      # 16 bytes in hex at the stack top
+(gdb) x/4xg $rsp                       # 4 qwords (giant words)
+(gdb) b *0x401016                      # breakpoint on an address
+(gdb) c                                # continue until the next breakpoint
+(gdb) display/i $pc                    # always show the next instruction
+        </plain-block>
+        <p>الـ gdb الخام قاسي شوية — ثبّت <b>GEF</b> أو <b>pwndbg</b>: بيعرضوا الـ registers والـ stack والـ code مع كل خطوة (زي المعمل بتاعنا). <code>x/FMT</code>: الحرف الأول العدد، وبعده الشكل (<code>x</code> hex، <code>d</code> decimal، <code>s</code> string، <code>i</code> instruction) والحجم (<code>b</code> byte، <code>h</code> 2، <code>w</code> 4، <code>g</code> 8).</p>
+
+        <h3 class="sub">x64dbg: الـ debugger اللي هتعيش فيه على Windows <span class="tag">malware analysis</span></h3>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🪟</div><h4>الشاشة الرئيسية (CPU tab)</h4><p><b>فوق شمال</b>: الـ disassembly (address · bytes · instruction · comment). <b>فوق يمين</b>: الـ registers والـ flags. <b>تحت شمال</b>: الـ dump (hex + ASCII). <b>تحت يمين</b>: الـ stack. — نفس تقسيم المعمل بتاعنا بالظبط.</p></div>
+          <div class="card reveal"><div class="ico">⌨️</div><h4>الاختصارات الأساسية</h4><p><kbd>F2</kbd> breakpoint · <kbd>F7</kbd> step into · <kbd>F8</kbd> step over · <kbd>F9</kbd> run · <kbd>Ctrl+F9</kbd> run لحد الـ ret · <kbd>Alt+F9</kbd> run لحد ما ترجع لكود البرنامج · <kbd>Ctrl+G</kbd> روح لعنوان · <kbd>;</kbd> comment · <kbd>:</kbd> label · <kbd>Space</kbd> عدّل instruction (patch).</p></div>
+          <div class="card reveal"><div class="ico">🧭</div><h4>x32dbg ولا x64dbg؟</h4><p>الحزمة فيها الاتنين: <b>x64dbg</b> للبرامج الـ 64-bit و<b>x32dbg</b> للـ 32-bit. افتح الـ sample في أداة زي <b>DIE</b> (Detect It Easy) الأول عشان تعرف نوعه.</p></div>
+          <div class="card reveal"><div class="ico">🧩</div><h4>Plugins أساسية</h4><p><b>ScyllaHide</b> (يخبّي الـ debugger من الـ anti-debugging)، و<b>Scylla</b> (لإعادة بناء الـ imports بعد الـ unpacking)، و<b>xAnalyzer</b> (يكتب أسماء الـ arguments جنب الـ API calls).</p></div>
+        </div>
+
+        <h3 class="sub">نفس الكود بـ 4 أشكال <span class="tag">syntax flavors</span></h3>
+        <p>هتقابل نفس الـ instructions مكتوبة بأكتر من صيغة حسب الأداة. الكورس بيكتب <b>NASM</b> (أنظف صيغة Intel)، والمعمل بيقبل صيغة IDA/x64dbg كمان. أهم فرق: <b>AT&amp;T</b> (الافتراضي في gdb/objdump) بيعكس ترتيب الـ operands.</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>NASM (الكورس)</th><th>MASM / IDA</th><th>GAS Intel (<code>-M intel</code>)</th><th>AT&amp;T (gdb / objdump الافتراضي)</th></tr></thead>
+            <tbody>
+              <tr><td><code>mov eax, 1</code></td><td><code>mov eax, 1</code></td><td><code>mov eax,0x1</code></td><td><code>mov $0x1,%eax</code></td></tr>
+              <tr><td><code>mov rax, [rbp-8]</code></td><td><code>mov rax, [rbp+var_8]</code></td><td><code>mov rax,QWORD PTR [rbp-0x8]</code></td><td><code>mov -0x8(%rbp),%rax</code></td></tr>
+              <tr><td><code>mov dword [rdi+rcx*4], 0</code></td><td><code>mov dword ptr [rdi+rcx*4], 0</code></td><td><code>mov DWORD PTR [rdi+rcx*4],0x0</code></td><td><code>movl $0x0,(%rdi,%rcx,4)</code></td></tr>
+              <tr><td><code>lea rsi, [rel msg]</code></td><td><code>lea rsi, msg</code></td><td><code>lea rsi,[rip+0x2ff9]</code></td><td><code>lea 0x2ff9(%rip),%rsi</code></td></tr>
+              <tr><td><code>movzx eax, byte [rsi]</code></td><td><code>movzx eax, byte ptr [rsi]</code></td><td><code>movzx eax,BYTE PTR [rsi]</code></td><td><code>movzbl (%rsi),%eax</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout tip"><span class="ci">🔁</span><div><strong>قراية AT&amp;T في 10 ثواني</strong><p>(1) الاتجاه: <code>source, destination</code> (عكس Intel). (2) الـ registers قبلها <code>%</code> والأرقام قبلها <code>$</code>. (3) الحجم في آخر الـ mnemonic: <code>b/w/l/q</code> = 8/16/32/64. (4) الذاكرة: <code>disp(base,index,scale)</code>. وفي gdb اكتب <code>set disassembly-flavor intel</code> وارتاح. IDA بيكتب المتغيرات المحلية بأسماء (<code>var_8</code> = <code>-8</code>) — لما تشوف <code>[rbp+var_8]</code> اقراها <code>[rbp-8]</code>.</p></div></div>
+
+        <h3 class="sub">مكتبة الطباعة بتاعة الكورس: <code>io.inc</code> <span class="tag">helpers</span></h3>
+        <p>طباعة رقم بالـ syscalls مش سهلة (لازم تحوّله لحروف — هنكتب ده بنفسنا في المرحلة 13). عشان كده الأمثلة اللي عليها علامة <code>io</code> بيتضاف لآخرها الكود ده أوتوماتيك. كله مكتوب بالـ instructions اللي هتتعلمها، ومافيهوش أي سحر — اقراه بعد ما تخلص الجزء التاني وهتفهمه كله:</p>
+        <asm-block file="io.inc (بيتضاف لآخر البرنامج)">@@IOLIB@@</asm-block>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الدالة</th><th>الـ input</th><th>بتطبع</th></tr></thead>
+            <tbody>
+              <tr><td><code>print_str</code></td><td><code>rdi</code> = عنوان string منتهية بـ 0</td><td>الـ string</td></tr>
+              <tr><td><code>print_int</code> / <code>print_uint</code></td><td><code>rdi</code> = الرقم</td><td>decimal (signed / unsigned)</td></tr>
+              <tr><td><code>print_hex</code></td><td><code>rdi</code> = الرقم</td><td><code>0x…</code></td></tr>
+              <tr><td><code>print_char</code> / <code>print_nl</code></td><td><code>dil</code> = الحرف / —</td><td>حرف / سطر جديد</td></tr>
+              <tr><td><code>exit</code></td><td><code>edi</code> = الـ exit code</td><td>بتنهي البرنامج</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn"><span class="ci">⚠️</span><div><strong>الدوال دي "مهذبة" زيادة عن اللزوم</strong><p>دوال <code>io.inc</code> بتحافظ على <b>كل</b> الـ registers والـ flags عشان تسهّل عليك. الدوال الحقيقية (زي <code>printf</code>) <b>مش كده</b>: مسموحلها تبوّظ <code>rax, rcx, rdx, rsi, rdi, r8–r11</code>. هنتعلم القواعد دي في مرحلة الـ calling conventions — ومن ساعتها هتعامل كل <code>call</code> على إنها ممكن تبوّظ الـ registers دي.</p></div></div>
+
+        <h3 class="sub">برنامج بيستخدم io.inc <span class="tag">RUN · DEBUG</span></h3>
+        <nasm-example file="countdown.asm" io>
+default rel
+section .data
+title: db "countdown:", 0
+
+section .text
+global _start
+_start:
+    lea rdi, [title]
+    call print_str
+    call print_nl
+    mov ebx, 5              ; counter (rbx survives calls in real ABIs too)
+.next:
+    mov edi, ebx
+    call print_int          ; print the counter
+    call print_nl
+    dec ebx                 ; ebx = ebx - 1, sets ZF when it reaches 0
+    jnz .next               ; loop while ebx != 0
+    mov edi, 0
+    call exit
+</nasm-example>
+        <p>في الـ 🔬 Debug: اضغط <kbd>F8</kbd> (Step Over) على كل <code>call print_int</code> عشان متدخلش جوه المكتبة، وراقب <code>rbx</code> بيقل والـ <b>ZF</b> بيبقى 1 لما يوصل صفر فالـ <code>jnz</code> مبيقفزش.</p>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 05</h3></div>
+
+          <quiz id="s05-q1" answer="2">
+            <q>في <code>msg: db "ABC", 10</code> ثم <code>len equ $ - msg</code>، قيمة <code>len</code>؟</q>
+            <o>3</o>
+            <o>10</o>
+            <o>4</o>
+            <o>عنوان msg</o>
+            <good>$ = العنوان بعد آخر byte (3 حروف + byte الـ newline = 4). الفرق بين عنوانين = عدد bytes.</good>
+            <bad>عدّ الـ bytes: A، B، C، وكمان الـ 10.</bad>
+          </quiz>
+          <quiz id="s05-q2" answer="0">
+            <q>كتبت <code>db "Hi\n"</code> في NASM. في الذاكرة هيتخزن:</q>
+            <o>4 bytes: <code>48 69 5C 6E</code> — الـ <code>\n</code> اتكتبت حرفيًا</o>
+            <o>3 bytes: <code>48 69 0A</code></o>
+            <o>خطأ في الـ assembly</o>
+            <o>2 bytes</o>
+            <good>NASM مبيعملش escapes جوه " أو '. عشان سطر جديد: <code>db "Hi", 10</code> أو استخدم الـ backquotes: <code>db `Hi\n`</code>.</good>
+            <bad>فيه فرق بين أنواع الـ quotes في NASM.</bad>
+          </quiz>
+          <quiz id="s05-q3" answer="3">
+            <q><code>ld</code> بيدوّر على أنهي symbol كنقطة بداية افتراضية؟</q>
+            <o><code>main</code></o>
+            <o><code>start</code></o>
+            <o><code>WinMain</code></o>
+            <o><code>_start</code></o>
+            <good>من غير libc، <code>ld</code> بيبدأ من <code>_start</code>. لما تستخدم gcc، الـ CRT هي اللي فيها <code>_start</code> وبتنادي <code>main</code> بتاعتك.</good>
+            <bad>بيبدأ بـ underscore.</bad>
+          </quiz>
+          <quiz id="s05-q4" answer="1">
+            <q>في gdb، الأمر <code>x/4xg $rsp</code> بيعمل إيه؟</q>
+            <o>بيطبع 4 bytes</o>
+            <o>بيطبع 4 qwords (8 bytes كل واحدة) بالـ hex من قمة الـ stack</o>
+            <o>بيطبع 4 instructions</o>
+            <o>بيكتب في الـ stack</o>
+            <good>x = examine، 4 = العدد، x = hex، g = giant (8 bytes).</good>
+            <bad>g = giant word = 8 bytes.</bad>
+          </quiz>
+          <quiz id="s05-q5" answer="2">
+            <q>في AT&amp;T: <code>mov %rsp,%rbp</code>. بصيغة Intel دي:</q>
+            <o><code>mov rsp, rbp</code></o>
+            <o><code>mov [rbp], rsp</code></o>
+            <o><code>mov rbp, rsp</code></o>
+            <o><code>xchg rbp, rsp</code></o>
+            <good>AT&amp;T = source, destination. فالـ destination هو rbp: <code>mov rbp, rsp</code> — أول سطر في أي function prologue.</good>
+            <bad>AT&amp;T بيعكس الترتيب.</bad>
+          </quiz>
+          <quiz id="s05-q6" answer="0">
+            <q>متغير global <code>buffer resb 4096</code>. المكان الطبيعي ليه:</q>
+            <o><code>section .bss</code> — مبياخدش مساحة في الملف، والـ loader بيصفّره</o>
+            <o><code>section .text</code></o>
+            <o><code>section .rodata</code></o>
+            <o>على الـ stack</o>
+            <good>.bss للبيانات اللي قيمتها الأولى صفر: الملف بيسجل الحجم بس. (ولو لقيت .bss ضخمة جدًا في sample — ممكن مكان هيتفك فيه payload.)</good>
+            <bad>resb = reserve من غير قيمة.</bad>
+          </quiz>
+          <quiz id="s05-q7" answer="3">
+            <q>في x64dbg، <kbd>Ctrl+F9</kbd> بيعمل إيه؟</q>
+            <o>بيعمل restart</o>
+            <o>Step Into</o>
+            <o>بيحط breakpoint</o>
+            <o>Execute till return: بيكمّل لحد ما الدالة الحالية توصل لـ <code>ret</code></o>
+            <good>مفيد جدًا لما تدخل في دالة طويلة بالغلط وعايز تخرج منها.</good>
+            <bad>بيخلّص الدالة الحالية.</bad>
+          </quiz>
+          <quiz id="s05-q8" answer="1">
+            <q>عايز تشوف كل الـ syscalls اللي برنامج Linux بيعملها (ملفات، شبكة…) من غير debugger. تستخدم:</q>
+            <o><code>objdump</code></o>
+            <o><code>strace</code></o>
+            <o><code>readelf</code></o>
+            <o><code>nasm</code></o>
+            <good>strace بيسجل كل syscall وarguments بتاعتها ونتيجتها — من أسرع طرق الـ dynamic analysis على Linux (وجوه VM طبعًا!). مقابله على Windows: Procmon / API Monitor.</good>
+            <bad>sys-trace.</bad>
+          </quiz>
+
+          <challenge id="s05-c1" title="Hello بالـ syscalls مباشرة" level="1">
+            <desc>اكتب برنامج (من غير <code>io.inc</code>) بيطبع السطر <code>Assembly is not scary</code> وبعده newline، وبعدين يعمل <code>exit(0)</code>. استخدم <code>write</code> (rax=1) و<code>exit</code> (rax=60)، واحسب الطول بـ <code>equ $ - msg</code>.</desc>
+            <starter>
+default rel
+section .data
+msg: db "change me", 10
+len equ $ - msg
+
+section .text
+global _start
+_start:
+    ; write(1, msg, len)
+
+    ; exit(0)
+    mov eax, 60
+    xor edi, edi
+    syscall
+</starter>
+            <expected>
+Assembly is not scary
+</expected>
+            <solution>
+default rel
+section .data
+msg: db "Assembly is not scary", 10
+len equ $ - msg
+
+section .text
+global _start
+_start:
+    mov eax, 1          ; write
+    mov edi, 1          ; stdout
+    lea rsi, [msg]
+    mov edx, len
+    syscall
+
+    mov eax, 60         ; exit
+    xor edi, edi
+    syscall
+</solution>
+          </challenge>
+
+          <challenge id="s05-c2" title="اطبع 3 أسطر بـ io.inc" level="1" io>
+            <desc>باستخدام <code>io.inc</code>: اطبع <code>name: ASM</code> في سطر، وبعدها الرقم <code>64</code> في سطر، وبعدها الرقم <code>0x401000</code> بالـ hex في سطر. المطلوب بالظبط:<br><code>name: ASM</code><br><code>64</code><br><code>0x401000</code></desc>
+            <starter>
+default rel
+section .data
+name: db "name: ASM", 0
+
+section .text
+global _start
+_start:
+    ; your code here
+    xor edi, edi
+    call exit
+</starter>
+            <expected>
+name: ASM
+64
+0x401000
+</expected>
+            <solution>
+default rel
+section .data
+name: db "name: ASM", 0
+
+section .text
+global _start
+_start:
+    lea rdi, [name]
+    call print_str
+    call print_nl
+    mov edi, 64
+    call print_int
+    call print_nl
+    mov edi, 0x401000
+    call print_hex
+    call print_nl
+    xor edi, edi
+    call exit
+</solution>
+          </challenge>
+
+          <lab-challenge id="s05-lc1" title="exit code محسوب" level="1" entry="_start">
+            <desc>اكتب برنامج <code>_start</code> بيخرج بـ exit code = <code>17 + 25</code>. احسب الجمع بالـ registers (<code>mov</code> و<code>add</code>) وحط النتيجة في <code>edi</code> قبل <code>exit</code> syscall (rax = 60).</desc>
+            <starter>
+section .text
+global _start
+_start:
+    mov eax, 60
+    xor edi, edi
+    syscall
+</starter>
+            <solution>
+section .text
+global _start
+_start:
+    mov edi, 17
+    add edi, 25         ; edi = 42
+    mov eax, 60         ; exit
+    syscall
+</solution>
+            <test setup="" expect="exit=42"/>
+          </lab-challenge>
+        </div>
+      </section>

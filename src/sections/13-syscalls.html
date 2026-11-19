@@ -1,0 +1,449 @@
+      <section class="section" id="s13" data-part="الجزء 3 · البرمجة الحقيقية" data-nav="برامج Linux بالـ syscalls" data-icon="🐧" data-keywords="syscall linux system call table read write open close mmap mprotect execve exit errno int 0x80 32-bit itoa atoi stdin parse number full program strace">
+        <div class="section-head">
+          <span class="section-index">13</span>
+          <div>
+            <p class="eyebrow">المرحلة الثالثة عشر · الجزء 3 يبدأ</p>
+            <h2>برامج Linux كاملة: الـ syscalls والـ I/O الحقيقي</h2>
+            <p class="lede">من غير libc، البرنامج بيكلم الـ kernel مباشرة. ده بالظبط اللي بيعمله الـ shellcode، والـ malware الـ statically linked على Linux (botnets زي Mirai)، وأي كود عايز يتهرب من الـ hooks. في المرحلة دي هتكتب بنفسك اللي <code>io.inc</code> كان بيعمله: تحويل الأرقام لنص والعكس، وقراية input حقيقي.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الـ Linux x64 Syscall ABI <span class="tag">recap</span></h3>
+        <div class="explorer" data-scene="syscall"></div>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>rax</th><th>الاسم</th><th>الـ arguments (rdi, rsi, rdx, r10, r8, r9)</th><th>هتشوفه في الـ malware عشان…</th></tr></thead>
+            <tbody>
+              <tr><td>0</td><td><code>read</code></td><td>fd, buf, count</td><td>قراية ملفات / socket</td></tr>
+              <tr><td>1</td><td><code>write</code></td><td>fd, buf, count</td><td>كتابة / إرسال</td></tr>
+              <tr><td>2 / 257</td><td><code>open</code> / <code>openat</code></td><td>path, flags, mode / dirfd, path, flags, mode</td><td>فتح ملفات (<code>/etc/passwd</code>، crontab…)</td></tr>
+              <tr><td>3</td><td><code>close</code></td><td>fd</td><td></td></tr>
+              <tr><td>9</td><td><code>mmap</code></td><td>addr, len, prot, flags, fd, off</td><td>حجز ذاكرة — <b>prot = 7 (RWX)</b> = 🚩</td></tr>
+              <tr><td>10</td><td><code>mprotect</code></td><td>addr, len, prot</td><td>تحويل ذاكرة لـ executable</td></tr>
+              <tr><td>41 / 42</td><td><code>socket</code> / <code>connect</code></td><td>domain, type, proto / fd, addr, len</td><td>الاتصال بالـ C2 (reverse shell)</td></tr>
+              <tr><td>33</td><td><code>dup2</code></td><td>oldfd, newfd</td><td>توصيل stdin/out بالـ socket</td></tr>
+              <tr><td>57 / 59</td><td><code>fork</code> / <code>execve</code></td><td>— / path, argv, envp</td><td>تشغيل <code>/bin/sh</code></td></tr>
+              <tr><td>60 / 231</td><td><code>exit</code> / <code>exit_group</code></td><td>status</td><td></td></tr>
+              <tr><td>62</td><td><code>kill</code></td><td>pid, sig</td><td>قتل الـ processes المنافسة (botnets)</td></tr>
+              <tr><td>101</td><td><code>ptrace</code></td><td>request, pid, …</td><td><b>anti-debugging</b>: <code>PTRACE_TRACEME</code> بيفشل لو فيه debugger</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn"><span class="ci">⚠️</span><div><strong>الأخطاء = أرقام سالبة</strong><p>الـ syscall مبترجعش <code>-1</code> وerrno زي libc — بترجع <b><code>−errno</code></b> مباشرة في <code>rax</code>: <code>−2</code> = ENOENT (الملف مش موجود)، <code>−13</code> = EACCES، <code>−14</code> = EFAULT (pointer غلط). يعني الفحص الصح: <code>test rax, rax</code> + <code>js error</code>. والـ syscall بتبوّظ <code>rcx</code> و<code>r11</code> دايمًا.</p></div></div>
+        <asm-lab id="s13-lab1" title="syscalls في المعمل: write وgetpid وread" setup='stdin="admin\n"' entry="_start">
+section .data
+prompt: db "user: "
+plen    equ $ - prompt
+section .bss
+buf:    resb 32
+
+section .text
+global _start
+_start:
+    mov eax, 1              ; write(1, prompt, plen)
+    mov edi, 1
+    lea rsi, [rel prompt]
+    mov edx, plen
+    syscall                 ; rax = 6, rcx/r11 destroyed
+    mov eax, 39             ; getpid()
+    syscall                 ; rax = pid
+    xor eax, eax            ; read(0, buf, 32)
+    xor edi, edi
+    lea rsi, [rel buf]
+    mov edx, 32
+    syscall                 ; rax = bytes read (6: "admin\n")
+    mov eax, 1              ; echo it back
+    mov edi, 1
+    lea rsi, [rel buf]
+    mov edx, 6
+    syscall
+    mov eax, 60
+    xor edi, edi
+    syscall
+</asm-lab>
+
+        <h3 class="sub">من رقم لنص: اكتب <code>itoa</code> بنفسك <span class="tag">print_uint من جوه</span></h3>
+        <p>الشاشة مبتعرفش أرقام — بتعرف حروف. عشان تطبع <code>1234</code> لازم تطلّع الأرقام: <code>1234 % 10 = 4</code>، <code>123 % 10 = 3</code>… وبتطلع <b>بالمقلوب</b>، فبنكتبها في buffer من آخره لأوله. وده بالظبط اللي في <code>print_uint</code>:</p>
+        <nasm-example file="itoa.asm">
+; print an unsigned number without any library
+default rel
+section .bss
+digits: resb 32
+
+section .text
+global _start
+_start:
+    mov rax, 9876543210
+    call print_u64
+    mov eax, 60
+    xor edi, edi
+    syscall
+
+print_u64:                  ; prints rax in decimal + '\n'
+    lea rsi, [digits + 31]
+    mov byte [rsi], 10      ; '\n' at the very end
+    mov ecx, 10
+.next:
+    xor edx, edx
+    div rcx                 ; rax = rax / 10, rdx = last digit
+    add dl, '0'             ; digit -> ASCII
+    dec rsi
+    mov [rsi], dl           ; fill the buffer backwards
+    test rax, rax
+    jnz .next
+    lea rdx, [digits + 32]
+    sub rdx, rsi            ; length = end - start
+    mov eax, 1              ; write(1, rsi, rdx)
+    mov edi, 1
+    syscall
+    ret
+</nasm-example>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>شكل الـ itoa في أي binary</strong><p>loop فيها قسمة على 10 (أو الـ magic <code>0xCCCCCCCD</code>!) + <code>add …, 30h</code> + كتابة لورا في buffer = تحويل رقم لـ string. والعكس (<code>sub …, 30h</code> + ضرب في 10 + جمع) = <code>atoi</code>. أول ما تعرف الـ pattern، سمّي الدالة وكمّل — متضيعش وقت تحللها سطر سطر.</p></div></div>
+
+        <h3 class="sub">من نص لرقم: <code>atoi</code> + قراية stdin <span class="tag">parsing</span></h3>
+        <p>البرنامج ده بيقرا رقم من stdin (زي ما الـ malware بيقرا config أو أمر من socket)، يحوّله لرقم، ويطبع مربعه. لاحظ الـ parsing: <code>result = result × 10 + (c − '0')</code> لحد أول حرف مش رقم:</p>
+        <nasm-example file="square.asm" io stdin="1234\n">
+default rel
+section .bss
+line: resb 64
+
+section .text
+global _start
+_start:
+    xor eax, eax            ; read(0, line, 64)
+    xor edi, edi
+    lea rsi, [line]
+    mov edx, 64
+    syscall
+    lea rdi, [line]
+    call atoi               ; rax = number
+    imul rax, rax           ; square it
+    mov rdi, rax
+    call print_int          ; 1522756
+    call print_nl
+    xor edi, edi
+    call exit
+
+atoi:                       ; rdi = text, returns rax
+    xor eax, eax
+.digit:
+    movzx ecx, byte [rdi]
+    sub ecx, '0'
+    cmp ecx, 9
+    ja .done                ; not a digit (unsigned trick: catches < '0' too)
+    imul rax, rax, 10
+    add rax, rcx
+    inc rdi
+    jmp .digit
+.done:
+    ret
+</nasm-example>
+
+        <h3 class="sub">32-bit: <code>int 0x80</code> <span class="tag">ABI مختلف تمامًا</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th></th><th>x86-64 (<code>syscall</code>)</th><th>x86 32-bit (<code>int 0x80</code>)</th></tr></thead>
+            <tbody>
+              <tr><td>رقم الـ syscall</td><td><code>rax</code></td><td><code>eax</code></td></tr>
+              <tr><td>الـ arguments</td><td><code>rdi, rsi, rdx, r10, r8, r9</code></td><td><code>ebx, ecx, edx, esi, edi, ebp</code></td></tr>
+              <tr><td>write / exit / execve</td><td>1 / 60 / 59</td><td><b>4 / 1 / 11</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>الأرقام مختلفة تمامًا! (<code>eax = 1</code> في 32-bit = <b>exit</b> مش write.) والفخ: <code>int 0x80</code> شغالة حتى في برنامج 64-bit، بس بتاخد <b>32 bit بس</b> من كل pointer — فأي عنوان فوق 4 GB (زي الـ stack <code>0x7FFF…</code>) بيتقص ويطلع <code>EFAULT</code>. جرّب في المعمل:</p>
+        <asm-lab id="s13-lab2" title="int 0x80 في برنامج 64-bit: الـ stack مش هيشتغل" entry="_start">
+section .data
+msg: db "from .data (low address) works", 10
+len  equ $ - msg
+
+section .text
+global _start
+_start:
+    mov eax, 4              ; 32-bit ABI: 4 = write
+    mov ebx, 1              ; fd
+    lea rcx, [rel msg]      ; 0x402000 fits in 32 bits -> OK
+    mov edx, len
+    int 0x80
+
+    push 0x0A4B4F           ; "OK\n" on the stack (0x7FFF... address)
+    mov eax, 4
+    mov ebx, 1
+    mov rcx, rsp            ; only ecx is used -> address truncated!
+    mov edx, 3
+    int 0x80                ; rax = -14 (EFAULT)
+
+    mov eax, 1              ; 32-bit ABI: 1 = exit
+    xor ebx, ebx
+    int 0x80
+</asm-lab>
+        <div class="callout mal"><span class="ci">🦠</span><div><strong>تعرّف على shellcode الـ Linux من نظرة</strong><p>الشكل ده (أو تنويعاته) هتقابله في exploits وفي الـ payloads: <code>xor eax, eax</code> · <code>push rax</code> · <code>mov rbx, 68732F2F6E69622Fh</code> (<code>"/bin//sh"</code>) · <code>push rbx</code> · <code>mov rdi, rsp</code> · <code>xor esi, esi</code> · <code>xor edx, edx</code> · <code>mov al, 3Bh</code> · <code>syscall</code> = <code>execve("/bin//sh", 0, 0)</code>. الـ <code>//</code> عشان الطول يبقى 8 بالظبط، و<code>mov al</code> بدل <code>mov eax</code> عشان مفيش null bytes. ولو قبلها <code>socket</code>/<code>connect</code>/<code>dup2</code> × 3 = <b>reverse shell</b>.</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 13</h3></div>
+
+          <quiz id="s13-q1" answer="1">
+            <q>في Linux x64، الـ argument الرابع لـ syscall بيتحط في:</q>
+            <o><code>rcx</code></o>
+            <o><code>r10</code></o>
+            <o><code>r8</code></o>
+            <o><code>rdx</code></o>
+            <good>r10 — مش rcx زي الدوال العادية، لأن الـ syscall instruction بتكتب RIP في rcx.</good>
+            <bad>الـ syscall بتبوّظ rcx فمينفعش يبقى argument.</bad>
+          </quiz>
+          <quiz id="s13-q2" answer="3">
+            <q><code>open</code> رجّعت <code>rax = 0xFFFFFFFFFFFFFFFE</code>. ده معناه:</q>
+            <o>الـ fd رقم ضخم</o>
+            <o>نجحت</o>
+            <o>الملف اتفتح للقراية بس</o>
+            <o>فشلت: <code>−2</code> = ENOENT (الملف مش موجود)</o>
+            <good>القيم من −1 لـ −4095 = أخطاء. لازم تفحص الإشارة.</good>
+            <bad>القيمة دي كـ signed كام؟</bad>
+          </quiz>
+          <quiz id="s13-q3" answer="0">
+            <q>sample لـ Linux بيعمل <code>mmap</code> بـ <code>rdx = 7</code>. الـ 7 دي:</q>
+            <o>PROT_READ | PROT_WRITE | PROT_EXEC — ذاكرة RWX (🚩 غالبًا shellcode/unpacking)</o>
+            <o>حجم الذاكرة</o>
+            <o>رقم الـ fd</o>
+            <o>flags الـ sharing</o>
+            <good>READ=1، WRITE=2، EXEC=4. المجموع 7 = كل الصلاحيات.</good>
+            <bad>الـ arg التالت لـ mmap = prot، وهو bit flags.</bad>
+          </quiz>
+          <quiz id="s13-q4" answer="2">
+            <q>برنامج 32-bit بيعمل <code>mov eax, 1</code> ثم <code>int 0x80</code>. ده:</q>
+            <o>write</o>
+            <o>read</o>
+            <o>exit</o>
+            <o>fork</o>
+            <good>في الـ 32-bit ABI: 1 = exit، 3 = read، 4 = write، 11 = execve. مختلفة عن الـ 64-bit!</good>
+            <bad>جدول الـ 32-bit مختلف.</bad>
+          </quiz>
+          <quiz id="s13-q5" answer="1">
+            <q>في loop لقيت <code>sub ecx, 30h</code> ثم <code>cmp ecx, 9</code> ثم <code>ja done</code> ثم <code>imul eax, eax, 10</code> ثم <code>add eax, ecx</code>. ده:</q>
+            <o>itoa</o>
+            <o>atoi (تحويل نص لرقم)</o>
+            <o>تشفير</o>
+            <o>strlen</o>
+            <good>كل حرف بيتحول لرقم ويتضاف للنتيجة × 10. الـ <code>ja</code> بعد الطرح (unsigned) بتمسك أي حرف مش رقم بمقارنة واحدة.</good>
+            <bad>0x30 = '0'. بيحوّل حرف لرقم ويبني النتيجة.</bad>
+          </quiz>
+          <quiz id="s13-q6" answer="3">
+            <q>malware على Linux بيعمل <code>ptrace(PTRACE_TRACEME, 0, 0, 0)</code> ولو رجعت <code>−1</code> (أو سالب) بيخرج. ليه؟</q>
+            <o>عشان يعمل fork</o>
+            <o>عشان يقرا ذاكرته</o>
+            <o>عشان يرفع الصلاحيات</o>
+            <o>anti-debugging: process واحد بس يقدر يعمل trace — لو gdb شغّال عليه، النداء بيفشل</o>
+            <good>تكنيك كلاسيكي. الحل: patch للـ jump، أو catch syscall في gdb وتغيير rax لصفر.</good>
+            <bad>ptrace = الـ API اللي gdb نفسه بيستخدمها.</bad>
+          </quiz>
+
+          <challenge id="s13-c1" title="اطبع رقم من غير io.inc" level="2">
+            <desc>من غير <code>io.inc</code>: اطبع <code>rax = 1234567</code> متبوع بسطر جديد، واخرج بـ <code>exit(0)</code>. (اكتب الـ itoa بنفسك: div على 10 والكتابة لورا في buffer في <code>.bss</code>.)</desc>
+            <starter>
+default rel
+section .bss
+buf: resb 32
+
+section .text
+global _start
+_start:
+    mov rax, 1234567
+    ; convert to text in buf and write it
+
+    mov eax, 60
+    xor edi, edi
+    syscall
+</starter>
+            <expected>
+1234567
+</expected>
+            <solution>
+default rel
+section .bss
+buf: resb 32
+
+section .text
+global _start
+_start:
+    mov rax, 1234567
+    lea rsi, [buf + 31]
+    mov byte [rsi], 10          ; newline at the end
+    mov ecx, 10
+.next:
+    xor edx, edx
+    div rcx
+    add dl, '0'
+    dec rsi
+    mov [rsi], dl
+    test rax, rax
+    jnz .next
+    lea rdx, [buf + 32]
+    sub rdx, rsi
+    mov eax, 1
+    mov edi, 1
+    syscall
+
+    mov eax, 60
+    xor edi, edi
+    syscall
+</solution>
+          </challenge>
+          <challenge id="s13-c2" title="مجموع أرقام من stdin" level="3" io>
+            <desc>اقرا سطر من stdin فيه أرقام مفصولة بمسافات (مثلًا <code>10 20 30 400</code>)، واطبع مجموعهم. (اعمل atoi بيتخطى المسافات ويكمّل.) الـ input في التصحيح: <code>10 20 30 400</code> ← المطلوب:<br><code>460</code></desc>
+            <starter>
+default rel
+section .bss
+line: resb 128
+
+section .text
+global _start
+_start:
+    xor eax, eax            ; read(0, line, 128)
+    xor edi, edi
+    lea rsi, [line]
+    mov edx, 128
+    syscall
+    ; parse the numbers and sum them ...
+
+    xor edi, edi
+    call exit
+</starter>
+            <stdin>
+10 20 30 400
+</stdin>
+            <expected>
+460
+</expected>
+            <solution>
+default rel
+section .bss
+line: resb 128
+
+section .text
+global _start
+_start:
+    xor eax, eax            ; read(0, line, 128)
+    xor edi, edi
+    lea rsi, [line]
+    mov edx, 128
+    syscall
+    lea rsi, [line]
+    lea r8, [line + rax]    ; end of input
+    xor ebx, ebx            ; total
+    xor eax, eax            ; current number
+.next:
+    cmp rsi, r8
+    jae .flush
+    movzx ecx, byte [rsi]
+    inc rsi
+    sub ecx, '0'
+    cmp ecx, 9
+    ja .sep                 ; space / newline -> end of a number
+    imul rax, rax, 10
+    add rax, rcx
+    jmp .next
+.sep:
+    add rbx, rax            ; add the finished number
+    xor eax, eax
+    jmp .next
+.flush:
+    add rbx, rax
+    mov rdi, rbx
+    call print_int
+    call print_nl
+    xor edi, edi
+    call exit
+</solution>
+          </challenge>
+
+          <lab-challenge id="s13-lc1" title="atoi بإشارة" level="2">
+            <desc><code>rdi</code> = string رقم (ممكن يبدأ بـ <code>-</code>). رجّع قيمته في <code>rax</code> (signed). وقف عند أول حرف مش رقم.</desc>
+            <starter>
+atoi:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+atoi:
+    xor eax, eax
+    xor r8d, r8d            ; negative flag
+    cmp byte [rdi], '-'
+    jne .digit
+    inc r8d
+    inc rdi
+.digit:
+    movzx ecx, byte [rdi]
+    sub ecx, '0'
+    cmp ecx, 9
+    ja .done
+    imul rax, rax, 10
+    add rax, rcx
+    inc rdi
+    jmp .digit
+.done:
+    test r8d, r8d
+    jz .ret
+    neg rax
+.ret:
+    ret
+</solution>
+            <test setup='rdi=&amp;"12345"' expect="rax=12345"/>
+            <test setup='rdi=&amp;"-42"' expect="rax=-42"/>
+            <test setup='rdi=&amp;"7 apples"' expect="rax=7"/>
+            <test setup='rdi=&amp;"0"' expect="rax=0"/>
+          </lab-challenge>
+          <lab-challenge id="s13-lc2" title="itoa في buffer" level="2">
+            <desc><code>rdi</code> = رقم unsigned، <code>rsi</code> = buffer فاضي (32 byte). اكتب الرقم decimal في أول الـ buffer <b>منتهي بـ 0</b>، ورجّع الطول في <code>rax</code>. (تلميح: اكتب الأرقام بالعكس وبعدين اعكسها، أو استخدم buffer مؤقت على الـ stack.)</desc>
+            <starter>
+itoa:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+itoa:                       ; rdi = value, rsi = out buffer
+    mov rax, rdi
+    mov r8, rsi             ; remember the start
+    mov ecx, 10
+.next:                      ; digits come out reversed
+    xor edx, edx
+    div rcx
+    add dl, '0'
+    mov [rsi], dl
+    inc rsi
+    test rax, rax
+    jnz .next
+    mov byte [rsi], 0
+    mov rax, rsi
+    sub rax, r8             ; length
+    dec rsi                 ; reverse in place [r8 .. rsi]
+.rev:
+    cmp r8, rsi
+    jae .done
+    mov dl, [r8]
+    mov cl, [rsi]
+    mov [r8], cl
+    mov [rsi], dl
+    inc r8
+    dec rsi
+    jmp .rev
+.done:
+    ret
+</solution>
+            <test setup='rdi=1234;rsi=&amp;"................................"' expect='rax=4;str(rsi)="1234"'/>
+            <test setup='rdi=0;rsi=&amp;"................................"' expect='rax=1;str(rsi)="0"'/>
+            <test setup='rdi=18446744073709551615;rsi=&amp;"................................"' expect='rax=20;str(rsi)="18446744073709551615"' label="أكبر قيمة 64-bit"/>
+          </lab-challenge>
+
+          <re-task id="s13-re1" title="syscall متخبّية" level="2" answer="execve" norm="text">
+            <desc>الكود ده بيحسب رقم الـ syscall بطريقة ملتوية عشان أدوات الـ static analysis متلاقيش <code>mov eax, 59</code>. أنهي syscall (64-bit Linux) هتتنفذ لو جت <code>syscall</code> بعده؟</desc>
+            <listing>
+hidden:
+    mov eax, 0x1337
+    xor eax, 0x130C
+    ret
+</listing>
+            <verify setup="" expect="eax=59"/>
+            <hint>احسب eax بالـ XOR، وارجع لجدول الـ syscalls.</hint>
+            <explain><code>0x1337 ^ 0x130C = 0x3B = 59</code> = <code>execve</code> على x86-64 Linux. ده obfuscation بسيط للـ constants؛ الـ emulation أو الـ debugger بيفضحه في ثانية.</explain>
+          </re-task>
+        </div>
+      </section>

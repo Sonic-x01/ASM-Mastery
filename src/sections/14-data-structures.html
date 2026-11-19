@@ -1,0 +1,286 @@
+      <section class="section" id="s14" data-part="الجزء 3 · البرمجة الحقيقية" data-nav="Arrays وStructs والهياكل" data-icon="🧱" data-keywords="array struct alignment padding offsetof stride 2d array row major array of structs linked list next pointer struct recovery ida ghidra structure field offset">
+        <div class="section-head">
+          <span class="section-index">14</span>
+          <div>
+            <p class="eyebrow">المرحلة الرابعة عشر · أشكال البيانات</p>
+            <h2>Arrays وStructs والـ Linked Lists: استرجاع شكل البيانات</h2>
+            <p class="lede">في الـ binary مفيش <code>struct</code> ولا أسماء fields — فيه <b>offsets</b> بس: <code>[rcx+18h]</code>، <code>[rax+rdx*8+10h]</code>. نص شغل الـ reverser هو إنه يجمع الـ offsets دي من دوال كتير ويبني منها الـ struct الأصلي (config الـ malware، packet الـ C2، جدول الأوامر). المرحلة دي بتعلّمك تقرا الـ "بصمة" دي.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الـ Arrays: <code>base + i × size</code> <span class="tag">1D · 2D</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>C</th><th>Assembly</th><th>ملاحظة</th></tr></thead>
+            <tbody>
+              <tr><td><code>char a[]; a[i]</code></td><td><code>movzx eax, byte [rdi+rsi]</code></td><td>scale 1</td></tr>
+              <tr><td><code>int a[]; a[i]</code></td><td><code>mov eax, [rdi+rsi*4]</code></td><td>scale 4</td></tr>
+              <tr><td><code>void *a[]; a[i]</code></td><td><code>mov rax, [rdi+rsi*8]</code></td><td>scale 8 (pointers / qwords)</td></tr>
+              <tr><td><code>struct s a[]; a[i].f</code> (sizeof=24)</td><td><code>lea rax, [rsi+rsi*2]</code> · <code>mov eax, [rdi+rax*8+f]</code></td><td>الحجم مش 1/2/4/8 ← lea/imul/shl قبلها</td></tr>
+              <tr><td><code>int g[R][10]; g[r][c]</code></td><td><code>(r×10 + c)×4</code></td><td>row-major: الصفوف ورا بعض</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="widget" data-widget="addr"></div>
+
+        <h3 class="sub">الـ Structs: الـ layout والـ padding <span class="tag">alignment rules</span></h3>
+        <p>الـ compiler بيرص الـ fields بالترتيب، بس كل field لازم يبدأ عند offset بيقبل القسمة على حجمه (int على 4، pointer على 8)، فبيضيف <b>padding</b>. وحجم الـ struct كله بيتقرّب لمضاعف أكبر alignment فيه (عشان الـ arrays). شوف:</p>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 990 150" role="img" aria-label="struct conn layout">
+            <text x="46" y="50" text-anchor="middle" class="d-tx">0</text><text x="158" y="50" text-anchor="middle" class="d-tx">4</text><text x="270" y="50" text-anchor="middle" class="d-tx">8</text><text x="382" y="50" text-anchor="middle" class="d-tx">12</text><text x="494" y="50" text-anchor="middle" class="d-tx">16</text><text x="606" y="50" text-anchor="middle" class="d-tx">20</text><text x="718" y="50" text-anchor="middle" class="d-tx">24</text><text x="830" y="50" text-anchor="middle" class="d-tx">28</text><text x="942" y="50" text-anchor="middle" class="d-tx">32</text>
+            <rect x="46" y="60" width="28" height="46" rx="6" class="d-box3"/><text x="60" y="80" text-anchor="middle" class="d-tb" style="font-size:11px">flag</text><text x="60" y="96" text-anchor="middle" class="d-tx">+0</text><text x="60" y="124" text-anchor="middle" class="d-ts">char</text>
+            <rect x="74" y="60" width="84" height="46" rx="6" class="d-dim" style="stroke-dasharray:4 3"/><text x="116" y="88" text-anchor="middle" class="d-tx">pad ×3</text>
+            <rect x="158" y="60" width="112" height="46" rx="6" class="d-box"/><text x="214" y="80" text-anchor="middle" class="d-tb" style="font-size:12px">port</text><text x="214" y="96" text-anchor="middle" class="d-tx">+0x4 · 4B</text><text x="214" y="124" text-anchor="middle" class="d-ts">int</text>
+            <rect x="270" y="60" width="56" height="46" rx="6" class="d-box2"/><text x="298" y="80" text-anchor="middle" class="d-tb" style="font-size:12px">type</text><text x="298" y="96" text-anchor="middle" class="d-tx">+0x8</text><text x="298" y="124" text-anchor="middle" class="d-ts">short</text>
+            <rect x="326" y="60" width="168" height="46" rx="6" class="d-dim" style="stroke-dasharray:4 3"/><text x="410" y="88" text-anchor="middle" class="d-tx">pad ×6</text>
+            <rect x="494" y="60" width="224" height="46" rx="6" class="d-box4"/><text x="606" y="80" text-anchor="middle" class="d-tb" style="font-size:12px">host</text><text x="606" y="96" text-anchor="middle" class="d-tx">+0x10 · 8B</text><text x="606" y="124" text-anchor="middle" class="d-ts">char *</text>
+            <rect x="718" y="60" width="224" height="46" rx="6" class="d-box5"/><text x="830" y="80" text-anchor="middle" class="d-tb" style="font-size:12px">timeout</text><text x="830" y="96" text-anchor="middle" class="d-tx">+0x18 · 8B</text><text x="830" y="124" text-anchor="middle" class="d-ts">long (4B على Windows + pad)</text>
+          </svg>
+          <figcaption><code>struct conn { char flag; int port; short type; char *host; long timeout; }</code> = <b>32 byte</b> رغم إن مجموع الـ fields 23 (على Linux). 9 bytes padding! لو رتبت الـ fields من الأكبر للأصغر هتوفّر. وعلى Windows (long = 4) الحجم برضه 32 (8 للـ alignment).</figcaption>
+        </figure>
+        <compiled file="structs.c" targets="gcc-O2,msvc-O2" graph note="<b>get_port</b>: <code>[rdi+4]</code> = الـ offset اللي رسمناه. <b>nth_host</b>: <code>sal rsi, 5</code> = i × 32 (حجم الـ struct) + <code>16</code> (offset الـ host) — الـ stride بيقولك حجم الـ struct! <b>grid_get</b>: <code>lea rax,[rsi+rsi*4]</code> (r×5) ثم <code>[rdi+rax*8]</code> (×8 = r×40 = r × 10 أعمدة × 4 bytes) ثم <code>+c×4</code>. <b>list_sum</b>: الـ value عند <code>+8</code> والـ next عند <code>+0</code> (<code>mov rdi, [rdi]</code>).">
+struct conn {
+    char  flag;
+    int   port;
+    short type;
+    char *host;
+    long  timeout;
+};
+
+int get_port(struct conn *c) { return c->port; }
+char *nth_host(struct conn *arr, int i) { return arr[i].host; }
+
+int grid_get(int g[][10], int r, int c) { return g[r][c]; }
+
+struct node { struct node *next; int value; };
+int list_sum(struct node *p) {
+    int s = 0;
+    while (p) { s += p->value; p = p->next; }
+    return s;
+}
+</compiled>
+        <p>ولما الـ loop تمشي على array of structs، الـ compiler غالبًا بيحوّلها لـ pointer بيزيد بـ <b>حجم الـ struct</b> كل لفة (<code>add rdi, 32</code>) والـ field عند offset ثابت (<code>[rdi+24]</code>). لو شفت <code>add reg, N</code> في آخر loop وكل القرايات من نفس الـ reg بـ offsets ثابتة ← N = حجم الـ struct:</p>
+        <compiled file="stride.c" targets="gcc-O2">
+struct conn { char flag; int port; short type; char *host; long timeout; };
+
+long total_timeout(struct conn *arr, int n) {
+    long t = 0;
+    for (int i = 0; i < n; i++)
+        t += arr[i].timeout;
+    return t;
+}
+</compiled>
+
+        <h3 class="sub">Struct Recovery: إزاي تبني الـ struct من الـ binary <span class="tag">RE workflow</span></h3>
+        <div class="steps">
+          <div class="step"><span class="n">01</span><div><h4>اجمع الـ offsets</h4><p>كل وصول بنفس الـ base register: <code>[rcx+4]</code> (dword)، <code>[rcx+8]</code> (word)، <code>[rcx+10h]</code> (qword pointer)… الحجم من الـ register أو <code>dword ptr</code>، والنوع من الاستخدام (pointer لو اتعمله dereference، signed لو movsx).</p></div></div>
+          <div class="step"><span class="n">02</span><div><h4>اعرف الحجم</h4><p>من الـ <code>malloc(0x20)</code> / <code>HeapAlloc</code> اللي اتعمل بيه، أو من الـ stride في الـ loops (<code>shl 5</code>، <code>add rdi, 20h</code>)، أو من <code>memset(p, 0, 0x20)</code>.</p></div></div>
+          <div class="step"><span class="n">03</span><div><h4>اعمله في الأداة</h4><p>IDA: Structures window (<kbd>Shift+F9</kbd>) أو Local Types؛ Ghidra: Data Type Manager أو "Auto Create Structure" على الـ parameter. وبعدين طبّقه على الـ pointer (<kbd>T</kbd> في IDA) — كل <code>[rcx+10h]</code> هتتحول لـ <code>conn-&gt;host</code>.</p></div></div>
+          <div class="step"><span class="n">04</span><div><h4>سمّي بالمعنى</h4><p>field بيتمرر لـ <code>connect()</code> كـ port ← سمّيه <code>port</code>. field بيتقارن بـ أرقام أوامر ← <code>cmd_id</code>. الـ struct اللي اتبنى صح بيخلي الـ pseudo-code يتقري كأنه source.</p></div></div>
+        </div>
+        <div class="callout mal"><span class="ci">🦠</span><div><strong>الـ config struct</strong><p>أغلب الـ malware عنده struct للـ config (C2 hosts، ports، sleep interval، mutex name، encryption key) بيتفك من الـ resources أو الـ .data في أول التشغيل. لو بنيت الـ struct ده صح، استخراج الـ IOCs بقى كتابة <b>config extractor</b> بسيط (Python) — ده شغل يومي في الـ threat intel.</p></div></div>
+
+        <h3 class="sub">الـ Linked Lists <span class="tag">🎬 scene</span></h3>
+        <p>أهم loop هتشوفها: <code>p = p-&gt;next</code> = <code>mov rdi, [rdi]</code>. Windows نفسه مبني على doubly-linked lists (<code>LIST_ENTRY</code>): قايمة الـ modules في الـ PEB، الـ processes في الـ kernel (<code>EPROCESS.ActiveProcessLinks</code> — اللي الـ rootkits بتفكها عشان تخبّي process: <b>DKOM</b>).</p>
+        <div class="explorer" data-scene="linkedlist"></div>
+        <asm-lab id="s14-lab1" title="Linked list حقيقية في الذاكرة" setup="rdi=node_a" expect="eax=42">
+section .data
+node_a: dq node_b, 10           ; { next, value }
+node_c: dq 0, 12                ; stored BEFORE node_b on purpose
+node_b: dq node_c, 20
+
+section .text
+list_sum:                       ; rdi = head
+    xor eax, eax
+    test rdi, rdi
+    je .done
+.next:
+    add eax, [rdi+8]            ; value
+    mov rdi, [rdi]              ; p = p->next
+    test rdi, rdi
+    jne .next
+.done:
+    ret
+</asm-lab>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 14</h3></div>
+
+          <quiz id="s14-q1" answer="2">
+            <q><code>struct { char a; double b; char c; }</code> على x64. الـ sizeof؟</q>
+            <o>10</o>
+            <o>16</o>
+            <o>24</o>
+            <o>17</o>
+            <good>a عند 0، pad 7، b عند 8 (8 bytes)، c عند 16، وبعدين pad لحد 24 (مضاعف 8 عشان الـ array). لو رتبتها b, a, c = 16 بس.</good>
+            <bad>الـ double لازم يبدأ على مضاعف 8، والحجم الكلي مضاعف أكبر alignment.</bad>
+          </quiz>
+          <quiz id="s14-q2" answer="0">
+            <q>في loop: كل القرايات <code>[rbx+8]</code> و<code>[rbx+14h]</code> و<code>[rbx]</code>، وفي آخرها <code>add rbx, 30h</code>. حجم الـ struct؟</q>
+            <o>48 byte (0x30)</o>
+            <o>20 byte</o>
+            <o>8 byte</o>
+            <o>مش معروف</o>
+            <good>الـ pointer بيتنقل للعنصر اللي بعده بـ stride = sizeof = 0x30.</good>
+            <bad>الـ add في آخر الـ loop = المسافة بين عنصرين.</bad>
+          </quiz>
+          <quiz id="s14-q3" answer="3">
+            <q><code>imul rax, rsi, 1Ch</code> ثم <code>mov edx, [rdi+rax+8]</code>. في C؟</q>
+            <o><code>arr[i]</code> لـ int</o>
+            <o><code>arr[i * 8]</code></o>
+            <o>2D array</o>
+            <o><code>arr[i].field</code> — struct حجمه 28 (0x1C) والـ field عند offset 8</o>
+            <good>الحجم مش power of 2 فاتحسب بـ imul، وبعدين offset الـ field.</good>
+            <bad>0x1C = حجم العنصر، و8 = offset جوه العنصر.</bad>
+          </quiz>
+          <quiz id="s14-q4" answer="1">
+            <q><code>mov rax, [rax]</code> جوه loop لحد ما <code>rax</code> يرجع لنفس قيمته الأولى. ده:</q>
+            <o>loop على array</o>
+            <o>المشي على circular linked list (زي InMemoryOrderModuleList في الـ PEB)</o>
+            <o>infinite loop</o>
+            <o>نسخ ذاكرة</o>
+            <good>Windows LIST_ENTRY دايرية: آخر عنصر بيشاور على الـ head. الشرط بيبقى "رجعت للبداية؟".</good>
+            <bad>القيمة الجاية من الذاكرة اللي rax بيشاور عليه = pointer للعنصر اللي بعده.</bad>
+          </quiz>
+          <quiz id="s14-q5" answer="2">
+            <q>عشان تعرف حجم struct مجهول في sample، أحسن دليل:</q>
+            <o>اسم المتغير</o>
+            <o>أول field</o>
+            <o>الـ size في <code>malloc</code>/<code>HeapAlloc</code> أو <code>memset</code> أو الـ stride في الـ loops</o>
+            <o>الـ strings</o>
+            <good>أي allocation أو تصفير أو stride بيديك الحجم الكامل مباشرة.</good>
+            <bad>إيه اللي بيتعامل مع الـ struct "كله مرة واحدة"؟</bad>
+          </quiz>
+
+          <lab-challenge id="s14-lc1" title="أكبر timeout في array of structs" level="2">
+            <desc><code>rdi</code> = pointer لـ array من <code>struct conn</code> (حجمه 32 byte، و<code>timeout</code> (qword signed) عند offset <code>0x18</code>)، <code>rsi</code> = عدد العناصر (≥ 1). رجّع أكبر timeout في <code>rax</code>.</desc>
+            <starter>
+section .data
+conns:  ; 3 structs of 32 bytes: flag, port, type, host, timeout
+    db 1, 0,0,0
+    dd 443
+    dw 2, 0,0,0
+    dq 0
+    dq 30
+    db 0, 0,0,0
+    dd 8080
+    dw 1, 0,0,0
+    dq 0
+    dq 120
+    db 1, 0,0,0
+    dd 53
+    dw 3, 0,0,0
+    dq 0
+    dq -5
+
+section .text
+max_timeout:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+section .data
+conns:  ; 3 structs of 32 bytes: flag, port, type, host, timeout
+    db 1, 0,0,0
+    dd 443
+    dw 2, 0,0,0
+    dq 0
+    dq 30
+    db 0, 0,0,0
+    dd 8080
+    dw 1, 0,0,0
+    dq 0
+    dq 120
+    db 1, 0,0,0
+    dd 53
+    dw 3, 0,0,0
+    dq 0
+    dq -5
+
+section .text
+max_timeout:
+    mov rax, [rdi+0x18]         ; best = arr[0].timeout
+.next:
+    dec rsi
+    jz .done
+    add rdi, 32                 ; next struct (stride = sizeof)
+    mov rcx, [rdi+0x18]
+    cmp rcx, rax
+    cmovg rax, rcx
+    jmp .next
+.done:
+    ret
+</solution>
+            <test setup="rdi=conns;rsi=3" expect="rax=120"/>
+            <test setup="rdi=conns;rsi=1" expect="rax=30" label="عنصر واحد"/>
+          </lab-challenge>
+          <lab-challenge id="s14-lc2" title="طول الـ linked list" level="2">
+            <desc><code>rdi</code> = head لـ linked list (<code>next</code> عند offset 0). رجّع عدد الـ nodes في <code>rax</code> (0 لو <code>rdi = NULL</code>).</desc>
+            <starter>
+section .data
+n1: dq n2, 0
+n2: dq n3, 0
+n3: dq n4, 0
+n4: dq 0, 0
+
+section .text
+list_len:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+section .data
+n1: dq n2, 0
+n2: dq n3, 0
+n3: dq n4, 0
+n4: dq 0, 0
+
+section .text
+list_len:
+    xor eax, eax
+.next:
+    test rdi, rdi
+    jz .done
+    inc rax
+    mov rdi, [rdi]
+    jmp .next
+.done:
+    ret
+</solution>
+            <test setup="rdi=n1" expect="rax=4"/>
+            <test setup="rdi=n3" expect="rax=2"/>
+            <test setup="rdi=0" expect="rax=0" label="قايمة فاضية"/>
+          </lab-challenge>
+
+          <re-task id="s14-re1" title="كام عمود؟" level="2" answer="12" norm="int">
+            <desc>الدالة دي بتقرا <code>g[r][c]</code> من 2D array من <code>int</code> (r في esi، c في edx). الـ array فيها كام عمود؟</desc>
+            <listing>
+grid_get:
+    movsxd rsi, esi
+    movsxd rdx, edx
+    lea rax, [rsi+rsi*2]
+    shl rax, 4
+    add rax, rdi
+    mov eax, [rax+rdx*4]
+    ret
+</listing>
+            <hint>طول الصف بالـ bytes = r × ؟ . (lea = r×3، shl 4 = ×16)</hint>
+            <explain>طول الصف = 3 × 16 = 48 byte، وكل عنصر int = 4 bytes ← 48 / 4 = <b>12 عمود</b>: <code>int g[][12]</code>.</explain>
+          </re-task>
+          <re-task id="s14-re2" title="الـ field بتاع الـ port" level="2" answer="0x1A" norm="int">
+            <desc>config struct لـ malware. الدالة دي بتقرا الـ port (word، big-endian على الشبكة) وبتحطه في <code>sockaddr</code>. الـ port عند أنهي offset في الـ struct؟</desc>
+            <listing>
+build_addr:                 ; rcx = config*, rdx = sockaddr_in*
+    mov word [rdx], 2       ; AF_INET
+    movzx eax, word [rcx+0x1A]
+    rol ax, 8               ; htons
+    mov [rdx+2], ax
+    mov eax, [rcx+0x14]
+    mov [rdx+4], eax        ; sin_addr
+    ret
+</listing>
+            <hint>الـ field اللي بيتعمله htons (rol ax, 8) وبيتكتب في sin_port (offset 2 في sockaddr_in).</hint>
+            <explain>الـ port = <code>word [rcx+0x1A]</code> (اتعمله byte-swap وراح لـ <code>sin_port</code>). والـ IP = <code>dword [rcx+0x14]</code> (راح لـ <code>sin_addr</code>). كده بقى عندك field-ين من الـ config struct: <code>+0x14 ip</code>، <code>+0x1A port</code>.</explain>
+          </re-task>
+        </div>
+      </section>

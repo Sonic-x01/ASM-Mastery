@@ -1,0 +1,400 @@
+      <section class="section" id="s08" data-part="الجزء 2 · الـ Instructions بالتفصيل" data-nav="الـ Bits والـ Shifts" data-icon="⚡" data-keywords="and or xor not test shl sal shr sar rol ror rcl rcr bt bts btr btc bsf bsr popcnt lzcnt tzcnt mask bitmask xor encryption decode key ror13 api hashing rotate shift">
+        <div class="section-head">
+          <span class="section-index">08</span>
+          <div>
+            <p class="eyebrow">المرحلة الثامنة · لغة الـ malware المفضلة</p>
+            <h2>الـ Bits: AND وOR وXOR والـ Shifts والـ Rotates</h2>
+            <p class="lede">التشفير البسيط، فك الـ strings، الـ API hashing، الـ checksums، الـ flags في الـ structs، الـ alignment — كلها bits. لو في sample لقيت loop فيها <code>xor</code> و<code>rol</code> — مبروك، غالبًا لقيت الـ decryption routine. المرحلة دي هتخليك تقراها وتكتبها وتعكسها.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">العمليات المنطقية <span class="tag">bit by bit</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>C</th><th>القاعدة لكل bit</th><th>الاستخدام الكلاسيكي</th></tr></thead>
+            <tbody>
+              <tr><td><code>and a, b</code></td><td><code>a &amp;= b</code></td><td>1 لو الاتنين 1</td><td><b>امسح</b> bits / خد جزء: <code>and eax, 0FFh</code> = آخر byte</td></tr>
+              <tr><td><code>or a, b</code></td><td><code>a |= b</code></td><td>1 لو أي واحد 1</td><td><b>شغّل</b> bits: <code>or eax, 4</code> = set bit 2</td></tr>
+              <tr><td><code>xor a, b</code></td><td><code>a ^= b</code></td><td>1 لو مختلفين</td><td><b>اقلب</b> bits، صفّر register، <b>تشفير</b></td></tr>
+              <tr><td><code>not a</code></td><td><code>a = ~a</code></td><td>اقلب كل bit</td><td>بناء masks (<code>~0x20</code>)؛ و<b>مبتغيرش الـ flags</b></td></tr>
+              <tr><td><code>test a, b</code></td><td><code>(a &amp; b) != 0</code></td><td>AND من غير تخزين</td><td><code>test eax, eax</code> = هل صفر؟ / <code>test al, 1</code> = فردي؟</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>كلهم (ما عدا <code>not</code>) بيعملوا <b>CF = OF = 0</b> وبيظبطوا ZF وSF حسب النتيجة. عشان كده <code>test eax, eax</code> + <code>je</code> هو أشهر شكل لـ <code>if (x == 0)</code>، و<code>test eax, eax</code> + <code>js</code> = <code>if (x &lt; 0)</code>.</p>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🎭</div><h4>الـ masks</h4><p>set: <code>x | (1&lt;&lt;n)</code> · clear: <code>x &amp; ~(1&lt;&lt;n)</code> · toggle: <code>x ^ (1&lt;&lt;n)</code> · test: <code>x &amp; (1&lt;&lt;n)</code>. في Windows هتشوف الـ flags دي في كل حاجة: <code>PAGE_*</code>، <code>FILE_ATTRIBUTE_*</code>، <code>CREATE_SUSPENDED</code> (= <code>4</code>)… لما تشوف <code>or ecx, 4</code> قبل <code>CreateProcess</code> = بيعمل process "suspended" — علامة <b>process hollowing</b>!</p></div>
+          <div class="card reveal"><div class="ico">🔐</div><h4>XOR = تشفير قابل للعكس</h4><p><code>(x ^ k) ^ k = x</code>. نفس العملية بتشفّر وبتفك. عشان كده أبسط وأشهر "تشفير" في الـ malware: single-byte XOR، multi-byte XOR key، أو XOR بـ key بيتغير (rolling). ضعيف جدًا كتشفير، بس كفاية يخبّي الـ strings من الـ <code>strings</code> tool والـ AV signatures.</p></div>
+        </div>
+        <div class="callout tip"><span class="ci">🕵️</span><div><strong>مش كل xor تشفير</strong><p><code>xor eax, eax</code> = تصفير. <code>xor eax, edx</code> مع <code>cdq</code> = abs. الـ XOR بتاع التشفير ليه شكل مميز: <b>loop</b> + <code>xor byte ptr [reg+index], key</code> (أو xor بين byte من الـ buffer وbyte من الـ key) + زيادة الـ index. أداة زي <b>capa</b> بتدور على النمط ده أوتوماتيك وبتقولك "encode data using XOR".</p></div></div>
+
+        <h3 class="sub">الـ Shifts والـ Rotates <span class="tag">bits on the move</span></h3>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 400" role="img" aria-label="shift and rotate instructions">
+            <g font-size="13">
+              <text x="30" y="58" class="d-tb d-acc">SHL / SAL</text><text x="30" y="78" class="d-tx">× 2ⁿ</text>
+              <rect x="190" y="38" width="56" height="44" rx="8" class="d-box3"/><text x="218" y="66" text-anchor="middle" class="d-tb">CF</text>
+              <g><rect x="270" y="38" width="440" height="44" rx="8" class="d-box"/><text x="490" y="66" text-anchor="middle" class="d-t">b7 b6 b5 b4 b3 b2 b1 b0</text></g>
+              <text x="760" y="66" class="d-tb d-grn">0</text>
+              <path class="d-ar-amb d-flow" d="M268,60 L250,60"/><path class="d-ar-acc d-flow" d="M752,60 L714,60"/>
+              <text x="975" y="66" class="d-ts ar">b7 بيروح لـ CF، وصفر بيدخل يمين</text>
+
+              <text x="30" y="148" class="d-tb d-acc">SHR</text><text x="30" y="168" class="d-tx">÷ 2ⁿ unsigned</text>
+              <text x="230" y="156" class="d-tb d-grn">0</text>
+              <rect x="270" y="128" width="440" height="44" rx="8" class="d-box"/><text x="490" y="156" text-anchor="middle" class="d-t">b7 b6 b5 b4 b3 b2 b1 b0</text>
+              <rect x="734" y="128" width="56" height="44" rx="8" class="d-box3"/><text x="762" y="156" text-anchor="middle" class="d-tb">CF</text>
+              <path class="d-ar-acc d-flow" d="M246,150 L268,150"/><path class="d-ar-amb d-flow" d="M712,150 L732,150"/>
+              <text x="975" y="156" class="d-ts ar">صفر بيدخل شمال، وb0 بيروح لـ CF</text>
+
+              <text x="30" y="238" class="d-tb d-acc">SAR</text><text x="30" y="258" class="d-tx">÷ 2ⁿ signed</text>
+              <rect x="270" y="218" width="440" height="44" rx="8" class="d-box2"/><text x="490" y="246" text-anchor="middle" class="d-t">b7 b6 b5 b4 b3 b2 b1 b0</text>
+              <rect x="734" y="218" width="56" height="44" rx="8" class="d-box3"/><text x="762" y="246" text-anchor="middle" class="d-tb">CF</text>
+              <path class="d-ar-vio" d="M300,216 C300,196 250,196 250,226 C250,240 262,240 268,240"/><path class="d-ar-amb d-flow" d="M712,240 L732,240"/>
+              <text x="975" y="246" class="d-ts ar">bit الإشارة (b7) بيتنسخ — السالب يفضل سالب</text>
+
+              <text x="30" y="328" class="d-tb d-acc">ROL / ROR</text><text x="30" y="348" class="d-tx">rotate</text>
+              <rect x="270" y="308" width="440" height="44" rx="8" class="d-box4"/><text x="490" y="336" text-anchor="middle" class="d-t">b7 b6 b5 b4 b3 b2 b1 b0</text>
+              <path class="d-ar-acc d-flow" d="M276,354 C276,388 704,388 704,354"/>
+              <text x="490" y="392" text-anchor="middle" class="d-tx">ROL: b7 بيلف لـ b0 (ومنسوخ في CF) — مفيش bit بيضيع</text>
+              <text x="975" y="336" class="d-ts ar">قلب ROR13 والـ hashing والتشفير</text>
+            </g>
+          </svg>
+          <figcaption><code>rcl</code>/<code>rcr</code> بيلفوا <b>عن طريق CF</b> (كأن الـ register بقى 9 bits). العدد بيبقى رقم ثابت أو <b><code>cl</code></b> بس، وبيتعمله mask لـ 5 bits (أو 6 للـ 64-bit): <code>shl eax, 33</code> = <code>shl eax, 1</code>!</figcaption>
+        </figure>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>C</th><th>ملاحظة</th></tr></thead>
+            <tbody>
+              <tr><td><code>shl eax, 3</code></td><td><code>x &lt;&lt; 3</code> = <code>x * 8</code></td><td>أسرع من الضرب</td></tr>
+              <tr><td><code>shr eax, 4</code></td><td><code>x &gt;&gt; 4</code> (unsigned)</td><td>= ÷16 للـ unsigned</td></tr>
+              <tr><td><code>sar eax, 4</code></td><td><code>x &gt;&gt; 4</code> (signed)</td><td>بيقرّب لـ <b>−∞</b>: <code>−1 &gt;&gt; 4 = −1</code>، مش 0! عشان كده <code>x/16</code> في C محتاجة تصحيح</td></tr>
+              <tr><td><code>rol eax, 13</code></td><td><code>(x &lt;&lt; 13) | (x &gt;&gt; 19)</code></td><td>الـ compilers بيتعرفوا على الـ pattern ده ويحوّلوه rol</td></tr>
+              <tr><td><code>shr rax, 63</code></td><td><code>x &lt; 0</code> (لو signed) / أعلى bit</td><td>استخراج bit الإشارة</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>الـ instruction اللي بتعملها هي اللي بتفضح النوع: <code>shr</code> ⇐ unsigned، <code>sar</code> ⇐ signed. وشوف الـ compiler بيعمل إيه مع شوية bit tricks — لاحظ إن MSVC كتب <code>rol 13</code> على شكل <code>ror 19</code> (نفس النتيجة بالظبط في 32-bit):</p>
+        <compiled file="bits.c" targets="gcc-O2,msvc-O2" note="<b>is_pow2</b>: <code>x &amp; (x-1)</code> بيمسح أصغر bit = 1؛ لو النتيجة صفر يبقى كان فيه bit واحد بس. <b>to_upper</b>: <code>-33</code> = <code>0xFFFFFFDF</code> = <code>~0x20</code>. <b>bit_set</b>: الـ shift بعدد متغير لازم يكون في <code>cl</code>.">
+int is_pow2(unsigned x) { return x && !(x & (x - 1)); }
+unsigned rotl13(unsigned x) { return (x << 13) | (x >> 19); }
+int bit_set(unsigned flags, int n) { return (flags >> n) & 1; }
+unsigned to_upper(unsigned c) { return c & ~0x20u; }
+int sar_div4(int x) { return x >> 2; }
+</compiled>
+        <asm-lab id="s08-lab1" title="الـ bits بعينك: masks وshifts وrotates">
+bits:
+    mov eax, 0b1011_0110    ; 0xB6
+    and eax, 0x0F           ; keep low nibble     -> 0x06
+    or  eax, 0x80           ; set bit 7           -> 0x86
+    xor eax, 0x01           ; toggle bit 0        -> 0x87
+    test eax, 0x02          ; is bit 1 set? (ZF=0 -> yes)
+    mov ebx, -16            ; 0xFFFFFFF0
+    sar ebx, 2              ; -16 >> 2 = -4  (sign kept)
+    mov ecx, -16
+    shr ecx, 2              ; 0x3FFFFFFC  (unsigned view)
+    mov edx, 0x12345678
+    rol edx, 8              ; 0x34567812
+    ror edx, 8              ; back to 0x12345678
+    ret
+</asm-lab>
+
+        <h3 class="sub">فك تشفير XOR: الـ pattern الأشهر في الـ malware <span class="tag">decoder loop</span></h3>
+        <p>الـ string الحقيقية (URL الـ C2 مثلًا) متخزنة مشفّرة في الـ <code>.data</code>، والـ malware بيفكها في الذاكرة لحظة الاستخدام. ده decoder حقيقي الشكل — شغّله في المعمل وراقب الـ Memory pane والـ bytes بتتغير واحد ورا التاني:</p>
+        <nasm-example file="xor_decode.asm" io>
+default rel
+section .data
+blob:   db 0x32, 0x2E, 0x2E, 0x2A, 0x60, 0x75, 0x75, 0x39, 0x68, 0x74   ; encrypted
+        db 0x3F, 0x22, 0x3B, 0x37, 0x2A, 0x36, 0x3F, 0x74, 0x39, 0x35
+        db 0x37, 0x75, 0x3D, 0x3B, 0x2E, 0x3F, 0x74, 0x2A, 0x32, 0x2A, 0
+BLOB_LEN equ 30
+KEY      equ 0x5A
+
+section .text
+global _start
+_start:
+    lea rsi, [blob]         ; rsi = pointer to the encrypted bytes
+    xor ecx, ecx            ; rcx = i = 0
+.decode:
+    xor byte [rsi+rcx], KEY ; blob[i] ^= 0x5A
+    inc rcx
+    cmp rcx, BLOB_LEN
+    jb .decode              ; while (i < 30)
+
+    mov rdi, rsi
+    call print_str          ; now it is readable
+    call print_nl
+    xor edi, edi
+    call exit
+</nasm-example>
+        <p>ونفس الـ loop لما الـ compiler يكتبها: gcc بـ <code>-O1</code> طلّع loop صغيرة نضيفة، لكن MSVC بـ <code>/O2</code> عملها <b>vectorized</b>: بيفك 64 byte في المرة بـ <code>xorps</code> على registers الـ xmm، وبعدين loop صغيرة للباقي. لما تلاقي الشكل التاني ده في sample — هو نفس الـ XOR decoder بالظبط.</p>
+        <compiled file="xor.c" targets="gcc-O1,msvc-O2">
+void xor_decode(unsigned char *buf, int n, unsigned char key) {
+    for (int i = 0; i < n; i++)
+        buf[i] ^= key;
+}
+</compiled>
+
+        <h3 class="sub">API Hashing بـ ROR13 <span class="tag">shellcode classic</span></h3>
+        <p>الـ shellcode والـ malware المتقدم مش بيكتب أسماء الـ APIs (<code>"VirtualAlloc"</code>) عشان متتمسكش. بدلها بيحسب <b>hash</b> لكل اسم في الـ export table بتاع الـ DLL، ويقارنه بـ hash ثابت في الكود. أشهر خوارزمية (من Metasploit والـ shellcode القديم): لكل حرف <code>h = ror(h, 13) + c</code>.</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>API</th><th>ROR13 hash</th></tr></thead>
+            <tbody>
+              <tr><td><code>LoadLibraryA</code></td><td><code>0xEC0E4E8E</code></td></tr>
+              <tr><td><code>GetProcAddress</code></td><td><code>0x7C0DFCAA</code></td></tr>
+              <tr><td><code>VirtualAlloc</code></td><td><code>0x91AFCA54</code></td></tr>
+              <tr><td><code>ExitProcess</code></td><td><code>0x73E2D87E</code></td></tr>
+              <tr><td><code>WinExec</code></td><td><code>0x0E8AFE98</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>لو شفت أي رقم من دول في sample — اعرف فورًا هو بيدوّر على أنهي API. ومحللين كتير عندهم قواعد بيانات بالـ hashes (زي <b>HashDB</b> plugin لـ IDA). هتكتب الخوارزمية دي بنفسك في التحدي تحت، وهنستخدمها بجد في مرحلة الـ PEB walking.</p>
+
+        <h3 class="sub">Bit Test وBit Scan <span class="tag">bt · bsf · bsr · popcnt</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>بتعمل إيه</th></tr></thead>
+            <tbody>
+              <tr><td><code>bt eax, 5</code></td><td>CF = bit رقم 5 (من غير ما تغيّر eax)</td></tr>
+              <tr><td><code>bts</code> / <code>btr</code> / <code>btc</code></td><td>نفس الكلام + set / reset / complement للـ bit (bitmaps، الـ thread-safe flags مع <code>lock</code>)</td></tr>
+              <tr><td><code>bsf ecx, eax</code></td><td>ecx = رقم أصغر bit = 1 (ZF=1 لو eax = 0 والـ destination مش بيتغير)</td></tr>
+              <tr><td><code>bsr ecx, eax</code></td><td>ecx = رقم أكبر bit = 1 (= ⌊log₂ x⌋)</td></tr>
+              <tr><td><code>popcnt ecx, eax</code></td><td>عدد الـ bits اللي = 1</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout re"><span class="ci">🔬</span><div><strong><code>bt</code> مع ثوابت ضخمة = switch مضغوط</strong><p>لما تشوف <code>mov rax, 0x2000100A</code> + <code>bt rax, rcx</code> + <code>jb</code>، ده الـ compiler بيختبر "هل rcx واحد من مجموعة قيم" مرة واحدة: كل bit = قيمة مسموحة. ده شكل <code>if (c == 1 || c == 3 || c == 12 || c == 29)</code>.</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 08</h3></div>
+
+          <quiz id="s08-q1" answer="1">
+            <q><code>and eax, 0FFFFFFF0h</code> بتعمل إيه؟</q>
+            <o>بتزوّد 16</o>
+            <o>بتمسح أول 4 bits ← بتقرّب eax لتحت لأقرب مضاعف لـ 16</o>
+            <o>بتقسم على 16</o>
+            <o>بتمسح أعلى 4 bits</o>
+            <good>الـ mask ده كله 1 ما عدا آخر 4 bits. ده بالظبط الـ alignment: <code>and rsp, -16</code> = اجعل الـ stack aligned على 16.</good>
+            <bad>0xF0 في الآخر = 1111 0000.</bad>
+          </quiz>
+          <quiz id="s08-q2" answer="3">
+            <q><code>test al, 1</code> ثم <code>jnz label</code>. الشرط في C؟</q>
+            <o><code>if (al == 1)</code></o>
+            <o><code>if (al &gt; 0)</code></o>
+            <o><code>if (al == 0)</code></o>
+            <o><code>if (al &amp; 1)</code> — يعني لو الرقم فردي</o>
+            <good>test بيعمل AND بالـ 1؛ النتيجة مش صفر لو آخر bit = 1 (فردي).</good>
+            <bad>test = AND من غير تخزين. jnz = لو النتيجة مش صفر.</bad>
+          </quiz>
+          <quiz id="s08-q3" answer="0">
+            <q><code>eax = -20</code>. بعد <code>sar eax, 2</code>؟</q>
+            <o>−5</o>
+            <o>5</o>
+            <o><code>0x3FFFFFFB</code></o>
+            <o>−20</o>
+            <good>sar بيحافظ على الإشارة: −20 ÷ 4 = −5 (وهنا مفيش باقي فمفيش مشكلة التقريب).</good>
+            <bad>sar = arithmetic shift للأرقام signed.</bad>
+          </quiz>
+          <quiz id="s08-q4" answer="2">
+            <q><code>eax = -1</code>. بعد <code>shr eax, 28</code>؟</q>
+            <o>−1</o>
+            <o>0</o>
+            <o>15 (<code>0xF</code>)</o>
+            <o><code>0xFFFFFFF0</code></o>
+            <good>shr بيدخّل أصفار: 0xFFFFFFFF >> 28 = 0xF.</good>
+            <bad>shr مش بيهتم بالإشارة.</bad>
+          </quiz>
+          <quiz id="s08-q5" answer="1">
+            <q>في loop لقيت: <code>movzx eax, byte ptr [rdx+rcx]</code> ثم <code>xor al, byte ptr [r8+r9]</code> ثم <code>mov [rdx+rcx], al</code> وبعدين <code>inc r9</code> وr9 بيرجع صفر كل ما يوصل 16. ده:</q>
+            <o>نسخ buffer</o>
+            <o>XOR decryption بمفتاح طوله 16 byte (repeating key)</o>
+            <o>حساب طول string</o>
+            <o>ضغط بيانات</o>
+            <good>buffer[i] ^= key[i % 16]. ضع breakpoint بعد الـ loop وdump الـ buffer تشوف الـ plaintext — أو اقرا الـ 16 byte بتوع الـ key وفكها بنفسك بـ CyberChef.</good>
+            <bad>byte من buffer XOR byte من مكان تاني بيتلف كل 16.</bad>
+          </quiz>
+          <quiz id="s08-q6" answer="2">
+            <q><code>rol eax, 8</code> على <code>0xAABBCCDD</code>؟</q>
+            <o><code>0xBBCCDD00</code></o>
+            <o><code>0xDDAABBCC</code></o>
+            <o><code>0xBBCCDDAA</code></o>
+            <o><code>0x00AABBCC</code></o>
+            <good>rotate left بـ byte: الـ AA اللي طلع من الشمال لف دخل يمين.</good>
+            <bad>rotate = shift بس اللي بيطلع بيدخل من الناحية التانية.</bad>
+          </quiz>
+          <quiz id="s08-q7" answer="0">
+            <q>قبل <code>CreateProcessA</code> لقيت الـ argument بتاع <code>dwCreationFlags</code> = <code>4</code>. ده معناه:</q>
+            <o><code>CREATE_SUSPENDED</code> — الـ process هيتعمل والـ main thread واقف (علامة process hollowing / injection)</o>
+            <o>Debug mode</o>
+            <o>إخفاء الشباك</o>
+            <o>أولوية عالية</o>
+            <good>CREATE_SUSPENDED = 0x4. الـ malware بيعمل process شرعي (svchost مثلًا) suspended، يستبدل الكود جواه، وبعدين ResumeThread. سلسلة الـ APIs دي من أشهر الـ indicators.</good>
+            <bad>دوّر على CreationFlags في MSDN: قيمة 4 = ؟</bad>
+          </quiz>
+          <quiz id="s08-q8" answer="3">
+            <q>ليه <code>shl eax, 32</code> مش بتصفّر <code>eax</code>؟</q>
+            <o>بتصفّره عادي</o>
+            <o>خطأ في الـ assembly</o>
+            <o>عشان بتحرك 32 bit ناحية rax</o>
+            <o>لأن العدد بيتعمله mask لـ 5 bits (32 &amp; 31 = 0) — فمفيش shift خالص</o>
+            <good>في 32-bit العدد = count &amp; 0x1F. وده سبب إن <code>x &lt;&lt; 32</code> في C undefined behavior.</good>
+            <bad>العدد بيتقص قبل ما يتنفذ.</bad>
+          </quiz>
+
+          <challenge id="s08-c1" title="فك الـ C2 config" level="2" io>
+            <desc>الـ bytes دي متشفّرة بـ XOR بمفتاح <b>متعدد</b> طوله 4: <code>0x13, 0x37, 0xC0, 0xDE</code> (الـ byte رقم i بيتعمله XOR مع <code>key[i % 4]</code>). فكها في مكانها واطبعها بـ <code>print_str</code>. المطلوب يطلع:<br><code>c2=10.0.0.5:8443</code></desc>
+            <starter>
+default rel
+section .data
+blob: db 0x70, 0x05, 0xFD, 0xEF, 0x23, 0x19, 0xF0, 0xF0, 0x23, 0x19, 0xF5, 0xE4, 0x2B, 0x03, 0xF4, 0xED, 0
+BLOB_LEN equ 16
+key:  db 0x13, 0x37, 0xC0, 0xDE
+
+section .text
+global _start
+_start:
+    ; decode blob in place: blob[i] ^= key[i % 4]
+
+    lea rdi, [blob]
+    call print_str
+    call print_nl
+    xor edi, edi
+    call exit
+</starter>
+            <expected>
+c2=10.0.0.5:8443
+</expected>
+            <solution>
+default rel
+section .data
+blob: db 0x70, 0x05, 0xFD, 0xEF, 0x23, 0x19, 0xF0, 0xF0, 0x23, 0x19, 0xF5, 0xE4, 0x2B, 0x03, 0xF4, 0xED, 0
+BLOB_LEN equ 16
+key:  db 0x13, 0x37, 0xC0, 0xDE
+
+section .text
+global _start
+_start:
+    lea rsi, [blob]
+    lea r8, [key]
+    xor ecx, ecx                ; i = 0
+.next:
+    mov edx, ecx
+    and edx, 3                  ; i % 4  (4 is a power of two)
+    mov al, [r8+rdx]            ; key byte
+    xor [rsi+rcx], al           ; decode in place
+    inc ecx
+    cmp ecx, BLOB_LEN
+    jb .next
+
+    lea rdi, [blob]
+    call print_str
+    call print_nl
+    xor edi, edi
+    call exit
+</solution>
+          </challenge>
+
+          <lab-challenge id="s08-lc1" title="هل الـ bit رقم n شغّال؟" level="1" forbid="bt" maxins="5">
+            <desc><code>rdi</code> = الرقم، <code>rsi</code> = رقم الـ bit (0..63). رجّع في <code>rax</code> = 1 لو الـ bit ده = 1، و0 لو لأ. ممنوع <code>bt</code> — استخدم shift و<code>and</code>. (الـ shift بعدد متغير لازم يبقى في <code>cl</code>.)</desc>
+            <starter>
+bit_set:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+bit_set:
+    mov rax, rdi
+    mov ecx, esi
+    shr rax, cl             ; bring bit n down to bit 0
+    and eax, 1              ; keep only it
+    ret
+</solution>
+            <test setup="rdi=0b1010;rsi=1" expect="rax=1"/>
+            <test setup="rdi=0b1010;rsi=2" expect="rax=0"/>
+            <test setup="rdi=0x8000000000000000;rsi=63" expect="rax=1"/>
+            <test setup="rdi=-1;rsi=0" expect="rax=1"/>
+          </lab-challenge>
+          <lab-challenge id="s08-lc2" title="قرّب لأعلى مضاعف لـ 16" level="2" maxins="3">
+            <desc>رجّع في <code>rax</code> أصغر مضاعف لـ 16 أكبر من أو يساوي <code>rdi</code> (الـ alignment اللي بتشوفه قبل حجز ذاكرة على الـ stack). <code>(x + 15) &amp; ~15</code>.</desc>
+            <starter>
+align16:
+    mov rax, rdi
+    ret
+</starter>
+            <solution>
+align16:
+    lea rax, [rdi+15]
+    and rax, -16            ; ~15 = 0xFFFF...FFF0
+    ret
+</solution>
+            <test setup="rdi=1" expect="rax=16"/>
+            <test setup="rdi=16" expect="rax=16"/>
+            <test setup="rdi=17" expect="rax=32"/>
+            <test setup="rdi=0" expect="rax=0"/>
+            <test setup="rdi=0x1234" expect="rax=0x1240"/>
+          </lab-challenge>
+          <lab-challenge id="s08-lc3" title="اكتب ROR13 hash بنفسك" level="3">
+            <desc><code>rdi</code> = عنوان اسم API (string منتهية بـ 0). احسب: <code>h = 0</code>، ولكل حرف <code>c</code>: <code>h = ror(h, 13) + c</code> (32-bit). رجّع <code>h</code> في <code>eax</code>. التستات بتستخدم أسماء APIs حقيقية — والنتيجة لازم تطابق الجدول فوق.</desc>
+            <starter>
+ror13_hash:
+    xor eax, eax            ; h = 0
+.next:
+    ; load one char, stop at 0, rotate, add
+    ret
+</starter>
+            <solution>
+ror13_hash:
+    xor eax, eax            ; h = 0
+.next:
+    movzx edx, byte [rdi]   ; c = *name
+    test edx, edx
+    jz .done                ; end of string
+    ror eax, 13
+    add eax, edx            ; h = ror(h,13) + c
+    inc rdi
+    jmp .next
+.done:
+    ret
+</solution>
+            <test setup='rdi=&amp;"LoadLibraryA"' expect="eax=0xEC0E4E8E"/>
+            <test setup='rdi=&amp;"GetProcAddress"' expect="eax=0x7C0DFCAA"/>
+            <test setup='rdi=&amp;"WinExec"' expect="eax=0x0E8AFE98"/>
+            <test setup='rdi=&amp;""' expect="eax=0" label="string فاضية"/>
+          </lab-challenge>
+
+          <re-task id="s08-re1" title="Crackme: rotate + xor" level="2" answer="0xF534565E" norm="int" bits="32">
+            <desc>الدالة دي بترجع <b>0</b> لو الـ key (في <code>edi</code>) صح. إيه الـ key؟ (فكّر بالعكس: كل عملية ليها عكس.)</desc>
+            <listing>
+check_key:
+    mov eax, edi
+    rol eax, 7
+    xor eax, 0x1337
+    sub eax, 0x9A2B3C4D     ; 0 only when the key is right
+    ret
+</listing>
+            <verify setup="edi={ans}" expect="eax=0"/>
+            <hint>عشان eax يبقى 0 لازم بعد الـ xor تبقى القيمة <code>0x9A2B3C4D</code>. اعكس: XOR بنفس الـ 0x1337 تاني، وبعدين ROR بـ 7.</hint>
+            <explain><code>0x9A2B3C4D ^ 0x1337 = 0x9A2B2F7A</code>، وبعدين <code>ror(0x9A2B2F7A, 7) = 0xF534565E</code>. الخطوات دي (اعكس كل عملية بالترتيب العكسي) هي بالظبط إزاي بتكتب <b>keygen</b> لأي crackme بسيط.</explain>
+          </re-task>
+          <re-task id="s08-re2" title="أنهي API ده؟" level="2" answer="VirtualAlloc" norm="text">
+            <desc>shellcode بيدوّر على API بالـ hash <code>0x91AFCA54</code> (ROR13). اسم الـ API إيه؟ (هتلاقيه في جدول المرحلة — وبعدين اتأكد بالمعمل: الـ hash function تحت بتاخد اسم.)</desc>
+            <listing>
+ror13_hash:
+    xor eax, eax
+.next:
+    movzx edx, byte [rdi]
+    test edx, edx
+    jz .done
+    ror eax, 13
+    add eax, edx
+    inc rdi
+    jmp .next
+.done:
+    ret
+</listing>
+            <verify setup='rdi=&amp;"{ans}"' expect="eax=0x91AFCA54"/>
+            <hint>shellcode بيحجز ذاكرة executable عشان يحط فيها الـ stage التانية…</hint>
+            <explain><code>VirtualAlloc</code> — الـ shellcode غالبًا هيحجز بيها ذاكرة RWX (<code>flProtect = 0x40</code>) وينسخ فيها payload. الـ hash بيتحسب case-sensitive، فلازم الاسم بالظبط.</explain>
+          </re-task>
+        </div>
+      </section>

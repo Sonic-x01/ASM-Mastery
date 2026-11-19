@@ -1,0 +1,285 @@
+      <section class="section" id="s03" data-part="الجزء 1 · الآلة من جوه" data-nav="الـ Registers" data-icon="🧩" data-keywords="registers rax rbx rcx rdx rsi rdi rsp rbp r8 r15 eax ax al ah r8d r8w r8b rip rflags segment fs gs teb xmm ymm debug registers dr0 dr7 hardware breakpoint cr3 zero extension partial register rex">
+        <div class="section-head">
+          <span class="section-index">03</span>
+          <div>
+            <p class="eyebrow">المرحلة الثالثة · مخازن الـ CPU</p>
+            <h2>الـ Registers: الـ 16 خانة اللي كل حاجة بتعدّي عليها</h2>
+            <p class="lede">الـ registers هي "إيد" الـ CPU: أي حساب لازم يعدّي عليها تقريبًا. في الـ disassembly، تتبّع قيم الـ registers هو 80% من شغلك. المرحلة دي هتخليك تعرف كل register، أجزاؤه، القواعد الغريبة بتاعته، وإزاي تقراه في الـ debugger.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الـ 16 General Purpose Registers <span class="tag">64-bit</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>64-bit</th><th>32-bit</th><th>16-bit</th><th>8-bit low</th><th>8-bit high</th><th>الأصل التاريخي</th><th>الاستخدام الشائع النهاردة</th></tr></thead>
+            <tbody>
+              <tr><td><code>rax</code></td><td><code>eax</code></td><td><code>ax</code></td><td><code>al</code></td><td><code>ah</code></td><td>Accumulator</td><td><b>القيمة الراجعة</b> من أي دالة، الضرب والقسمة، رقم الـ syscall</td></tr>
+              <tr><td><code>rbx</code></td><td><code>ebx</code></td><td><code>bx</code></td><td><code>bl</code></td><td><code>bh</code></td><td>Base</td><td>عام — callee-saved (الدالة لازم ترجّعه زي ما هو)</td></tr>
+              <tr><td><code>rcx</code></td><td><code>ecx</code></td><td><code>cx</code></td><td><code>cl</code></td><td><code>ch</code></td><td>Counter</td><td>عدّاد الـ loops والـ <code>rep</code>، عدد الـ shift (<code>cl</code>)، <b>arg1 على Windows</b></td></tr>
+              <tr><td><code>rdx</code></td><td><code>edx</code></td><td><code>dx</code></td><td><code>dl</code></td><td><code>dh</code></td><td>Data</td><td>النص العالي في الضرب/القسمة، arg2 Windows، arg3 Linux</td></tr>
+              <tr><td><code>rsi</code></td><td><code>esi</code></td><td><code>si</code></td><td><code>sil</code></td><td>—</td><td>Source Index</td><td>مصدر الـ string ops، <b>arg2 على Linux</b></td></tr>
+              <tr><td><code>rdi</code></td><td><code>edi</code></td><td><code>di</code></td><td><code>dil</code></td><td>—</td><td>Destination Index</td><td>هدف الـ string ops، <b>arg1 على Linux</b></td></tr>
+              <tr><td><code>rbp</code></td><td><code>ebp</code></td><td><code>bp</code></td><td><code>bpl</code></td><td>—</td><td>Base Pointer</td><td>الـ frame pointer (في الكود غير المحسّن) أو register عادي</td></tr>
+              <tr><td><code>rsp</code></td><td><code>esp</code></td><td><code>sp</code></td><td><code>spl</code></td><td>—</td><td>Stack Pointer</td><td><b>قمة الـ stack</b> — متلعبش فيه إلا بحساب!</td></tr>
+              <tr><td><code>r8</code>…<code>r15</code></td><td><code>r8d</code>…</td><td><code>r8w</code>…</td><td><code>r8b</code>…</td><td>—</td><td>جديدة في x64</td><td>r8/r9 = arg5/arg6 Linux و arg3/arg4 Windows؛ الباقي عام</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>الأسماء الغريبة دي (accumulator، counter…) <b>تاريخية</b>. النهاردة كل الـ registers عامة تقريبًا، بس بعض الـ instructions لسه متمسكة بـ register معيّن (<code>mul</code>/<code>div</code> بـ rax وrdx، الـ shifts بـ cl، الـ string ops بـ rsi/rdi/rcx)، والـ <b>calling conventions</b> بتدي كل register دور ثابت. اسم الـ register بيقولك حجم العملية: <code>r</code> = 64، <code>e</code> = 32 (Extended)، من غير بادئة = 16، و<code>l</code>/<code>h</code> = 8.</p>
+
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 330" role="img" aria-label="أجزاء register RAX و R8">
+            <g font-size="11">
+              <text x="40" y="34" class="d-tx">bit 63</text><text x="924" y="34" class="d-tx">bit 0</text>
+              <text x="474" y="34" class="d-tx">31</text><text x="702" y="34" class="d-tx">15</text><text x="816" y="34" class="d-tx">7</text>
+            </g>
+            <rect x="40" y="44" width="920" height="40" rx="8" class="d-box"/><text x="500" y="70" text-anchor="middle" class="d-tb">RAX — 64 bit</text>
+            <rect x="500" y="92" width="460" height="40" rx="8" class="d-box2"/><text x="730" y="118" text-anchor="middle" class="d-tb">EAX — 32 bit</text>
+            <rect x="40" y="92" width="452" height="40" rx="8" class="d-dim"/><text x="266" y="118" text-anchor="middle" class="d-ts ar">النص العالي: مالوش اسم لوحده</text>
+            <rect x="730" y="140" width="230" height="40" rx="8" class="d-box3"/><text x="845" y="166" text-anchor="middle" class="d-tb">AX — 16</text>
+            <rect x="730" y="188" width="113" height="40" rx="8" class="d-box4"/><text x="786" y="214" text-anchor="middle" class="d-tb">AH</text>
+            <rect x="847" y="188" width="113" height="40" rx="8" class="d-box4"/><text x="903" y="214" text-anchor="middle" class="d-tb">AL</text>
+            <rect x="40" y="250" width="920" height="34" rx="8" class="d-box"/><text x="270" y="272" text-anchor="middle" class="d-t">R8 (64)</text>
+            <rect x="500" y="250" width="460" height="34" rx="8" class="d-box2" opacity=".9"/><text x="615" y="272" text-anchor="middle" class="d-t">R8D (32)</text>
+            <rect x="730" y="250" width="230" height="34" rx="8" class="d-box3" opacity=".9"/><text x="788" y="272" text-anchor="middle" class="d-t">R8W</text>
+            <rect x="847" y="250" width="113" height="34" rx="8" class="d-box4" opacity=".95"/><text x="903" y="272" text-anchor="middle" class="d-t">R8B</text>
+            <text x="500" y="314" text-anchor="middle" class="d-ts ar">R8–R15 مفيهمش "high byte" — أسماؤهم: الـ D = dword، الـ W = word، الـ B = byte (بعض الأدوات بتكتبها R8L)</text>
+          </svg>
+          <figcaption>كل الأجزاء دي <b>نفس الـ register الفعلي</b> — <code>al</code> مش register منفصل، ده آخر 8 bits من <code>rax</code>. لو غيّرت <code>al</code> اتغيّر <code>rax</code>.</figcaption>
+        </figure>
+
+        <div class="widget" data-widget="regs"></div>
+
+        <h3 class="sub">القاعدة الذهبية: الكتابة الجزئية <span class="tag">partial register writes</span></h3>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🧹</div><h4>الكتابة في 32-bit بتصفّر الباقي</h4><p><code>mov eax, 5</code> ⇐ <code>rax = 0x0000000000000005</code>. الـ 32 bit العليا <b>بتتصفر أوتوماتيك</b>. ده قرار AMD عشان يمنع اعتمادية خفية على القيمة القديمة (أسرع للـ CPU).</p></div>
+          <div class="card reveal"><div class="ico">🧩</div><h4>الكتابة في 8/16-bit مبتلمسش الباقي</h4><p><code>mov al, 5</code> ⇐ بيتغير أول byte بس، والـ 56 bit التانيين زي ما هما. نفس الكلام لـ <code>ax</code> و<code>ah</code>. (ده سلوك قديم من أيام الـ 16-bit واتساب زي ما هو.)</p></div>
+        </div>
+        <p>النتيجة العملية في الـ disassembly:</p>
+        <ul>
+          <li><code>xor eax, eax</code> = <code>rax = 0</code> (2 bytes بس: <code>31 C0</code>) — أشهر idiom في x64. مش هتشوف <code>mov rax, 0</code> تقريبًا أبدًا.</li>
+          <li><code>mov eax, edi</code> قبل استخدام <code>rax</code> كـ index = تحويل <code>unsigned int</code> لـ 64-bit (zero-extend مجاني).</li>
+          <li><code>mov eax, eax</code> = "صفّر النص العالي" — بتشوفها كتير قبل jump tables و array indexing.</li>
+          <li>أي دالة بترجع <code>int</code> بتكتب في <code>eax</code>، فالـ caller لو عايز 64-bit هيعمل <code>movsxd rax, eax</code> (لو signed).</li>
+        </ul>
+        <asm-lab id="s03-lab1" title="القاعدة بعينك: 32-bit بتصفّر، 8/16 لأ">
+partial:
+    mov rax, 0x1122334455667788
+    mov al, 0xAA            ; only bits 0-7 change
+    mov ah, 0xBB            ; only bits 8-15 change
+    mov ax, 0xCCCC          ; only bits 0-15 change
+    mov eax, 0xDDDDDDDD     ; bits 32-63 become ZERO!
+    mov r9, -1              ; r9 = 0xFFFFFFFFFFFFFFFF
+    mov r9b, 0              ; r9 = 0xFFFFFFFFFFFFFF00
+    mov r9d, r9d            ; "self-move" clears the upper half
+    xor ecx, ecx            ; the idiom: rcx = 0
+    ret
+</asm-lab>
+        <div class="callout warn"><span class="ci">⚠️</span><div><strong>قيد الـ high-byte registers</strong><p><code>ah</code>/<code>bh</code>/<code>ch</code>/<code>dh</code> مينفعش يتجمعوا في instruction واحدة مع أي حاجة محتاجة <b>REX prefix</b> (يعني <code>r8</code>–<code>r15</code>، أو <code>sil</code>/<code>dil</code>/<code>spl</code>/<code>bpl</code>، أو operand 64-bit). <code>mov ah, sil</code> و<code>movzx rax, ah</code> = خطأ. السبب في الـ encoding: نفس الـ bits اللي بتعني <code>ah</code> من غير REX بتعني <code>spl</code> مع REX. جرّب تكتبها في المعمل وشوف رسالة الخطأ.</p></div></div>
+
+        <h3 class="sub">الـ Registers الخاصة <span class="tag">RIP · RFLAGS · segments</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Register</th><th>الوظيفة</th><th>ملاحظة للـ RE</th></tr></thead>
+            <tbody>
+              <tr><td><code>RIP</code></td><td>عنوان الـ instruction الجاية</td><td>مينفعش <code>mov rip, x</code> — بيتغير بـ jmp/call/ret بس. بس ينفع تقراه: <code>lea rax, [rip]</code></td></tr>
+              <tr><td><code>RFLAGS</code></td><td>bits حالة: CF ZF SF OF PF AF DF TF IF…</td><td>كل الـ conditional jumps بتقرا منه. ليه مرحلة كاملة (07)</td></tr>
+              <tr><td><code>CS</code> <code>DS</code> <code>ES</code> <code>SS</code></td><td>segment registers</td><td>في 64-bit الـ base بتاعهم = 0 (flat memory) — تقريبًا ملهمش لازمة</td></tr>
+              <tr><td><code>FS</code> / <code>GS</code></td><td>segments ليها base حقيقي</td><td>Windows x64: <code>gs:[30h]</code> = الـ TEB، <code>gs:[60h]</code> = الـ <b>PEB</b>. Windows x86: <code>fs:[30h]</code> = PEB. Linux x64: <code>fs:[28h]</code> = الـ stack canary</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout mal"><span class="ci">🦠</span><div><strong>أشهر سطرين في الـ shellcode والـ malware</strong><p><code>mov rax, gs:[60h]</code> (أو <code>mov eax, fs:[30h]</code> في 32-bit) = "هات عنوان الـ PEB". من الـ PEB الـ malware بيعرف هل فيه debugger (<code>PEB.BeingDebugged</code> عند offset 2)، وبيلاقي الـ DLLs المحمّلة عشان يجيب عناوين الـ APIs من غير ما يستورد حاجة. لما تشوف <code>gs:[60h]</code> اعرف إنك قدام كود "مش طبيعي" — هنفصّله في مرحلة Windows Internals.</p></div></div>
+
+        <h3 class="sub">الـ Registers التانية اللي هتقابلها <span class="tag">SIMD · debug · control</span></h3>
+        <div class="grid-3">
+          <div class="card reveal"><div class="ico">🧮</div><h4>XMM0–15 / YMM / ZMM</h4><p>registers واسعة (128 / 256 / 512 bit) للـ floats والـ SIMD. الـ compilers بيستخدموها لـ <code>memcpy</code> و<code>memset</code> السريعين ولفك التشفير المتوازي. <code>xmm0</code> = القيمة الراجعة لو float/double.</p></div>
+          <div class="card reveal"><div class="ico">🐞</div><h4>DR0–DR7</h4><p><b>Debug registers</b>: DR0–DR3 بيشيلوا عناوين الـ <b>hardware breakpoints</b>، وDR7 بيتحكم فيهم. الـ malware بيقراهم بـ <code>GetThreadContext</code> عشان يكشف الـ debugger — anti-debugging كلاسيكي.</p></div>
+          <div class="card reveal"><div class="ico">🔐</div><h4>CR0 / CR3 / CR4</h4><p><b>Control registers</b> للـ kernel بس (Ring 0): CR3 = عنوان جدول الـ paging بتاع الـ process. هتشوفهم في تحليل الـ rootkits والـ drivers.</p></div>
+        </div>
+
+        <h3 class="sub">الـ Registers في الأدوات <span class="tag">x64dbg · gdb</span></h3>
+        <div class="split-2">
+          <plain-block file="x64dbg — registers pane" lang="text">
+RAX : 0000000000000001
+RBX : 0000000000000000
+RCX : 00007FF7A1B21000   module.00007FF7A1B21000
+RDX : 000000F4E3AFF6D8
+RBP : 0000000000000000
+RSP : 000000F4E3AFF6A8
+RSI : 0000000000000000
+RDI : 0000000000000000
+R8  : 000000F4E3AFF6D8
+...
+RIP : 00007FF7A1B21004   module.00007FF7A1B21004
+RFLAGS : 0000000000000246
+ZF : 1  PF : 1  AF : 0  OF : 0  SF : 0  DF : 0  CF : 0
+          </plain-block>
+          <plain-block file="gdb" lang="bash">
+(gdb) info registers rax rip
+rax            0x1                 1
+rip            0x401004            0x401004 <_start+4>
+(gdb) p/x $eax          # read a sub-register
+$1 = 0x1
+(gdb) set $rax = 0x41   # change a register
+(gdb) info registers eflags
+eflags         0x246               [ PF ZF IF ]
+          </plain-block>
+        </div>
+        <p>لاحظ إن x64dbg بيكتب جنب القيمة <b>معناها</b> لو بتشاور على حاجة معروفة (module، string، function). استخدم ده: register قيمته <code>00007FF…</code> غالبًا عنوان كود/DLL، و<code>000000F4…</code> بالشكل ده غالبًا stack. وفي المعمل بتاعنا، اضغط على أي register يظهر لك نفس النوع من التفاصيل.</p>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 03</h3></div>
+
+          <quiz id="s03-q1" answer="1">
+            <q><code>rax = 0x1122334455667788</code>. بعد <code>mov ax, 0</code>، <code>rax</code> = ؟</q>
+            <o><code>0x0000000000000000</code></o>
+            <o><code>0x1122334455660000</code></o>
+            <o><code>0x1122334400000000</code></o>
+            <o><code>0x0000000055660000</code></o>
+            <good>الكتابة في 16-bit بتغيّر آخر 16 bit بس.</good>
+            <bad>القاعدة: 32-bit بس هي اللي بتصفّر النص العالي.</bad>
+          </quiz>
+          <quiz id="s03-q2" answer="2">
+            <q><code>rax = 0x1122334455667788</code>. بعد <code>mov eax, 0</code>، <code>rax</code> = ؟</q>
+            <o><code>0x1122334400000000</code></o>
+            <o><code>0x1122334455667700</code></o>
+            <o><code>0x0000000000000000</code></o>
+            <o>نفس القيمة</o>
+            <good>الكتابة في أي register 32-bit بتصفّر الـ 32 bit العليا.</good>
+            <bad>دي الكتابة الـ 32-bit — القاعدة الخاصة.</bad>
+          </quiz>
+          <quiz id="s03-q3" answer="0">
+            <q>على Linux x64، الـ argument الأول لأي دالة بيتحط في:</q>
+            <o><code>rdi</code></o>
+            <o><code>rcx</code></o>
+            <o><code>rax</code></o>
+            <o>على الـ stack</o>
+            <good>System V ABI: rdi, rsi, rdx, rcx, r8, r9. على Windows: rcx, rdx, r8, r9.</good>
+            <bad>Linux و Windows مختلفين. على Linux بيبدأ بـ "destination index".</bad>
+          </quiz>
+          <quiz id="s03-q4" answer="3">
+            <q>أنهي instruction من دول <b>مش</b> هتتعمل assemble؟</q>
+            <o><code>mov al, bl</code></o>
+            <o><code>mov ah, bl</code></o>
+            <o><code>mov r8b, cl</code></o>
+            <o><code>mov ah, r8b</code></o>
+            <good><code>r8b</code> محتاج REX، و<code>ah</code> مينفعش مع REX.</good>
+            <bad>دوّر على الـ instruction اللي فيها high-byte register مع حاجة محتاجة REX.</bad>
+          </quiz>
+          <quiz id="s03-q5" answer="1">
+            <q>إيه أشهر طريقة يصفّر بيها الـ compiler register 64-bit؟</q>
+            <o><code>mov rax, 0</code></o>
+            <o><code>xor eax, eax</code></o>
+            <o><code>sub rax, rax</code></o>
+            <o><code>and rax, 0</code></o>
+            <good>2 bytes بس، والـ CPU بيتعرّف عليها كـ "zeroing idiom" ومبيستناش القيمة القديمة. وبتصفّر rax كله بسبب قاعدة الـ 32-bit.</good>
+            <bad>دوّر على أقصر encoding — وافتكر قاعدة الـ 32-bit.</bad>
+          </quiz>
+          <quiz id="s03-q6" answer="2">
+            <q>في sample 64-bit لـ Windows لقيت <code>mov rax, qword ptr gs:[60h]</code>. الكود ده بيجيب:</q>
+            <o>الـ stack canary</o>
+            <o>عنوان الـ main</o>
+            <o>عنوان الـ PEB (Process Environment Block)</o>
+            <o>الوقت الحالي</o>
+            <good>gs:[60h] على x64 Windows = PEB. منه الـ malware بيكشف الـ debugger أو بيلف على الـ DLLs المحمّلة.</good>
+            <bad>على Windows x64، GS بيشاور على الـ TEB، وعند offset 0x60 فيه pointer لهيكل مهم جدًا للـ process.</bad>
+          </quiz>
+          <quiz id="s03-q7" answer="0">
+            <q>الـ malware بيقرا <code>Dr0</code>–<code>Dr3</code> من الـ thread context. بيدوّر على إيه؟</q>
+            <o>hardware breakpoints حاطها الـ debugger</o>
+            <o>الـ software breakpoints (<code>int3</code>)</o>
+            <o>عدد الـ cores</o>
+            <o>الـ encryption key</o>
+            <good>لو أي واحد منهم مش صفر، فيه hardware breakpoint ⇐ غالبًا فيه analyst! الحل في x64dbg: plugins زي ScyllaHide أو إنك تستخدم software breakpoints في الأماكن دي.</good>
+            <bad>DR = Debug Registers. بيشيلوا عناوين من نوع معيّن من الـ breakpoints.</bad>
+          </quiz>
+          <quiz id="s03-q8" answer="3">
+            <q>بعد <code>mov ecx, 0FFFFFFFFh</code>، قيمة <code>rcx</code>؟</q>
+            <o><code>0xFFFFFFFFFFFFFFFF</code></o>
+            <o><code>-1</code> (64-bit)</o>
+            <o>مش متحدد</o>
+            <o><code>0x00000000FFFFFFFF</code></o>
+            <good>الكتابة 32-bit بتعمل <b>zero</b>-extension مش sign-extension. rcx = 4294967295.</good>
+            <bad>القاعدة بتصفّر، مبتنسخش الإشارة.</bad>
+          </quiz>
+
+          <re-task id="s03-re1" title="تتبّع rax" level="1" answer="0x22225544" norm="int">
+            <desc>إيه قيمة <code>rax</code> في الآخر؟ (اكتبها hex، والأصفار اللي على الشمال مش مهمة)</desc>
+            <listing>
+trace:
+    mov rax, 0x1111111111111111
+    mov eax, 0x22222222
+    mov ax, 0x3333
+    mov al, 0x44
+    mov ah, 0x55
+    ret
+</listing>
+            <verify setup="" expect="rax={ans}"/>
+            <hint>سطر بسطر: الـ <code>mov eax</code> بيصفّر النص العالي، والباقي بيغيّر أجزاء صغيرة بس.</hint>
+            <explain><code>0x1111111111111111</code> ← <code>mov eax</code> ← <code>0x0000000022222222</code> ← <code>mov ax</code> ← <code>0x0000000022223333</code> ← <code>mov al</code> ← <code>…3344</code> ← <code>mov ah</code> ← <code>0x0000000022225544</code>.</explain>
+          </re-task>
+          <re-task id="s03-re2" title="الـ self-move" level="2" answer="0xFFFFFF00" norm="int">
+            <desc>إيه قيمة <code>rcx</code> في الآخر؟</desc>
+            <listing>
+trace:
+    mov rcx, -1         ; all ones
+    mov cl, 0
+    mov ecx, ecx
+    ret
+</listing>
+            <verify setup="" expect="rcx={ans}"/>
+            <hint>بعد السطر التاني: كل الـ bits واحد ما عدا أول byte. السطر التالت كتابة 32-bit…</hint>
+            <explain><code>0xFFFFFFFFFFFFFFFF</code> ← <code>mov cl, 0</code> ← <code>0xFFFFFFFFFFFFFF00</code> ← <code>mov ecx, ecx</code> بيكتب نفس الـ 32 bit السفلى (<code>0xFFFFFF00</code>) <b>وبيصفّر</b> العليا ← <code>0x00000000FFFFFF00</code>.</explain>
+          </re-task>
+
+          <lab-challenge id="s03-lc1" title="غيّر AL بس" level="1" maxins="2">
+            <desc><code>rax</code> جاي فيه أي قيمة. خلّي أول byte = <code>0x41</code> ('A') <b>من غير</b> ما تغيّر أي bit تاني في <code>rax</code>.</desc>
+            <starter>
+patch:
+    mov eax, 0x41
+    ret
+</starter>
+            <solution>
+patch:
+    mov al, 0x41
+    ret
+</solution>
+            <test setup="rax=0x1122334455667788" expect="rax=0x1122334455667741"/>
+            <test setup="rax=-1" expect="rax=0xFFFFFFFFFFFFFF41"/>
+            <test setup="rax=0" expect="rax=0x41"/>
+          </lab-challenge>
+          <lab-challenge id="s03-lc2" title="اقلب الـ bytes في AX" level="2" maxins="4">
+            <desc><code>ax</code> فيه رقم 16-bit زي <code>0x1234</code>. خلّيه <code>0x3412</code> (بدّل <code>ah</code> و<code>al</code>) — والـ 48 bit العليا من <code>rax</code> لازم تفضل زي ما هي. مسموحلك تستخدم <code>bl</code> كمساعد. (ده بالظبط اللي <code>htons</code> بيعمله لرقم الـ port!)</desc>
+            <starter>
+swap16:
+    ; your code here
+    ret
+</starter>
+            <solution>
+swap16:
+    mov bl, al          ; save the low byte
+    mov al, ah          ; low  <- high
+    mov ah, bl          ; high <- saved low
+    ret
+</solution>
+            <test setup="rax=0x1234" expect="rax=0x3412"/>
+            <test setup="rax=0x1122334455660050" expect="rax=0x1122334455665000" label="port 80 → 0x5000"/>
+            <test setup="rax=0xFFFF" expect="rax=0xFFFF"/>
+          </lab-challenge>
+          <lab-challenge id="s03-lc3" title="صفّر النص العالي في instruction واحدة" level="2" maxins="2" forbid="and">
+            <desc>خلّي الـ 32 bit العليا من <code>rax</code> = 0 والسفلى زي ما هي، في instruction <b>واحدة</b> (+ <code>ret</code>). ممنوع تستخدم <code>and</code>.</desc>
+            <starter>
+clear_hi:
+    ret
+</starter>
+            <solution>
+clear_hi:
+    mov eax, eax        ; 32-bit write zero-extends
+    ret
+</solution>
+            <test setup="rax=0xDEADBEEF12345678" expect="rax=0x12345678"/>
+            <test setup="rax=-1" expect="rax=0xFFFFFFFF"/>
+          </lab-challenge>
+        </div>
+      </section>

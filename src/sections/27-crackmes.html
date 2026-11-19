@@ -1,0 +1,226 @@
+      <section class="section" id="s27" data-part="الجزء 5 · التطبيق" data-nav="Crackmes" data-icon="🔑" data-keywords="crackme keygen serial password license check reverse engineering challenge vm bytecode xor checksum">
+        <div class="section-head">
+          <span class="section-index">27</span>
+          <div>
+            <p class="eyebrow">المرحلة السابعة والعشرين · اكسرها</p>
+            <h2>سلسلة Crackmes: من الـ strcmp للـ VM</h2>
+            <p class="lede">كل crackme دالة <code>check(rdi = key)</code> بترجع <code>1</code> لو الـ key صح. اقرا الكود، افهم الشرط، واكتب key يعدّي. في الـ crackmes اللي عليها 🧪 <b>keygen</b>: فيه مفاتيح كتير صح — الصفحة بتشغّل الكود بتاعك في المعمل بالـ key اللي كتبته، فأي key سليم هيتقبل. افتح 🔬 Debug على أي واحدة وجرّب بـ <code>rdi=&amp;"…"</code>.</p>
+          </div>
+        </div>
+
+        <div class="callout lab-tip"><span class="ci">🧪</span><div><strong>طريقة الشغل</strong><p>(1) اقرا الكود من غير تشغيل وحدد: الـ input بيتقري إزاي؟ الشرط النهائي إيه؟ (2) اكتب اللي فهمته كـ C في ورقة. (3) استنتج الـ key (أو اكتب keygen). (4) اتأكد في المعمل: 🔬 Debug ← Setup ← <code>rdi=&amp;"KEY"</code> ← Run ← <code>rax = 1</code>؟</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">🔑</span> الـ Crackmes</h3></div>
+
+          <re-task id="s27-re1" title="Crackme 1: qword واحد" level="1" answer="R3v3rs3" norm="str" entry="check">
+            <desc>الـ key كله بيتقارن في instruction واحدة.</desc>
+            <listing>
+check:                          ; rdi = key
+    mov rax, 0x0033737233763352
+    cmp [rdi], rax              ; 8 bytes at once (incl. the terminating NUL)
+    jne .bad
+    mov eax, 1
+    ret
+.bad:
+    xor eax, eax
+    ret
+</listing>
+            <verify setup='rdi=&amp;"{ans}"' expect="eax=1"/>
+            <reject ans="R3v3rs3!"/>
+            <hint>little-endian: أقل byte = أول حرف. 0x52 = 'R'.</hint>
+            <explain>الـ bytes في الذاكرة: <code>52 33 76 33 72 73 33 00</code> = <b>R3v3rs3</b> + NUL. الـ NUL جزء من المقارنة، فـ <code>R3v3rs3!</code> مش هتعدّي.</explain>
+          </re-task>
+
+          <re-task id="s27-re2" title="Crackme 2: XOR table" level="1" answer="x0r_k3y!" norm="str" entry="check">
+            <desc>كل حرف بيتعمله XOR ويتقارن بجدول في <code>.data</code>.</desc>
+            <listing>
+section .data
+enc: db 0x4F, 0x07, 0x45, 0x68, 0x5C, 0x04, 0x4E, 0x16
+
+section .text
+check:                          ; rdi = key
+    xor ecx, ecx
+.loop:
+    movzx eax, byte [rdi+rcx]
+    xor al, 0x37
+    cmp al, [enc+rcx]
+    jne .bad
+    inc ecx
+    cmp ecx, 8
+    jne .loop
+    cmp byte [rdi+8], 0         ; exactly 8 characters
+    jne .bad
+    mov eax, 1
+    ret
+.bad:
+    xor eax, eax
+    ret
+</listing>
+            <verify setup='rdi=&amp;"{ans}"' expect="eax=1"/>
+            <reject ans="x0r_k3y"/>
+            <hint>key[i] = enc[i] ^ 0x37.</hint>
+            <explain>0x4F^0x37 = 'x'، 0x07^0x37 = '0'… ← <b>x0r_k3y!</b>. الـ XOR بيرجع لأصله لو عملته مرتين — نفس كل الـ string decoders.</explain>
+          </re-task>
+
+          <re-task id="s27-re3" title="Crackme 3: checksum (keygen) 🧪" level="2" answer="PPPPPP" norm="str" entry="check" live="">
+            <desc>فيه آلاف المفاتيح الصح. لاقي واحد (أي واحد).</desc>
+            <listing>
+check:                          ; rdi = key
+    xor eax, eax                ; sum
+    xor ecx, ecx                ; length
+.loop:
+    movzx edx, byte [rdi+rcx]
+    test edx, edx
+    jz .end
+    lea r8d, [rdx-'A']
+    cmp r8d, 25
+    ja .bad                     ; only 'A'..'Z'
+    add eax, edx
+    inc ecx
+    jmp .loop
+.end:
+    cmp ecx, 6
+    jne .bad
+    cmp eax, 0x1E0
+    jne .bad
+    mov eax, 1
+    ret
+.bad:
+    xor eax, eax
+    ret
+</listing>
+            <verify setup='rdi=&amp;"{ans}"' expect="eax=1"/>
+            <reject ans="PPPPPQ"/>
+            <reject ans="ppppPP"/>
+            <reject ans="PPPPP"/>
+            <hint>6 حروف كبيرة مجموع الـ ASCII بتاعهم 0x1E0 = 480. المتوسط = 80 = ؟</hint>
+            <explain>480 / 6 = 80 = <code>'P'</code> ← <b>PPPPPP</b>، أو أي توليفة مجموعها 480: <code>OOQQPP</code>، <code>AAAAAA</code> + تعديل… ده «keygen» بسيط: الشرط علاقة رياضية مش key واحد.</explain>
+          </re-task>
+
+          <re-task id="s27-re4" title="Crackme 4: Name-Serial (keygen) 🧪" level="3" answer="ABCD-BC71" norm="str" entry="check" live="">
+            <desc>الشكل: <code>NAME-XXXX</code> — 4 حروف كبيرة، شرطة، و4 hex digits (كبيرة). الجزء التاني لازم يطابق checksum محسوب من الاسم. اكتب serial صح لأي اسم.</desc>
+            <listing>
+check:                          ; rdi = key
+    push rbx
+    xor eax, eax                ; checksum
+    xor ecx, ecx
+.name:
+    movzx edx, byte [rdi+rcx]
+    lea r8d, [rdx-'A']
+    cmp r8d, 25
+    ja .bad
+    lea r9d, [rcx+1]
+    imul edx, r9d               ; name[i] * (i+1)
+    add eax, edx
+    inc ecx
+    cmp ecx, 4
+    jne .name
+    cmp byte [rdi+4], '-'
+    jne .bad
+    xor eax, 0xBEEF
+    and eax, 0xFFFF
+    xor ebx, ebx                ; parse 4 hex digits
+    mov ecx, 5
+.hex:
+    movzx edx, byte [rdi+rcx]
+    lea r8d, [rdx-'0']
+    cmp r8d, 9
+    jbe .digit
+    lea r8d, [rdx-'A']
+    cmp r8d, 5
+    ja .bad
+    add r8d, 10
+.digit:
+    shl ebx, 4
+    or ebx, r8d
+    inc ecx
+    cmp ecx, 9
+    jne .hex
+    cmp byte [rdi+9], 0
+    jne .bad
+    cmp eax, ebx
+    jne .bad
+    mov eax, 1
+    pop rbx
+    ret
+.bad:
+    xor eax, eax
+    pop rbx
+    ret
+</listing>
+            <verify setup='rdi=&amp;"{ans}"' expect="eax=1"/>
+            <reject ans="ABCD-BC72"/>
+            <reject ans="abcd-BC71"/>
+            <reject ans="ABCD-bc71"/>
+            <hint>checksum = (A×1 + B×2 + C×3 + D×4) XOR 0xBEEF، آخر 16 bit، مكتوب hex كبير. لـ "ABCD": 65 + 132 + 201 + 272 = 670 = 0x29E.</hint>
+            <explain>0x29E ^ 0xBEEF = 0xBC71 ← <b>ABCD-BC71</b>. لأي اسم: اكتب keygen صغير (Python): <code>s = sum(ord(c)*(i+1) for i,c in enumerate(name)); print(f"{name}-{(s ^ 0xBEEF) &amp; 0xFFFF:04X}")</code> — مثلًا <code>ZZZZ-BD6B</code>. ده نفس شكل الـ license checks في البرامج القديمة.</explain>
+          </re-task>
+
+          <re-task id="s27-re5" title="Crackme 5: Mini-VM" level="3" answer="VM4ever" norm="str" entry="check">
+            <desc>الـ check مكتوب بـ <b>bytecode</b> لـ VM صغير (زي VMProtect بس لعبة). افهم الـ opcodes، فك البرنامج، وطلّع الـ key.</desc>
+            <listing>
+section .data
+prog:                           ; [opcode, operand] pairs
+    db 0x01, 0x00, 0x02, 0x13, 0x04, 0x45
+    db 0x01, 0x01, 0x03, 0x28, 0x04, 0x75
+    db 0x01, 0x02, 0x02, 0x35, 0x04, 0x01
+    db 0x01, 0x03, 0x03, 0x36, 0x04, 0x9B
+    db 0x01, 0x04, 0x02, 0x57, 0x04, 0x21
+    db 0x01, 0x05, 0x03, 0x44, 0x04, 0xA9
+    db 0x01, 0x06, 0x02, 0x79, 0x04, 0x0B
+    db 0x05, 0x07, 0xFF, 0x00
+
+section .text
+check:                          ; rdi = key
+    lea rsi, [rel prog]         ; vm instruction pointer
+    xor eax, eax                ; vm accumulator
+.fetch:
+    movzx ecx, byte [rsi]       ; opcode
+    movzx edx, byte [rsi+1]     ; operand
+    add rsi, 2
+    cmp ecx, 1
+    je .load
+    cmp ecx, 2
+    je .xor
+    cmp ecx, 3
+    je .add
+    cmp ecx, 4
+    je .cmp
+    cmp ecx, 5
+    je .len
+    cmp ecx, 0xFF
+    je .win
+    jmp .bad
+.load:
+    movzx eax, byte [rdi+rdx]   ; acc = key[operand]
+    jmp .fetch
+.xor:
+    xor eax, edx
+    jmp .fetch
+.add:
+    add eax, edx
+    and eax, 0xFF
+    jmp .fetch
+.cmp:
+    cmp eax, edx
+    jne .bad
+    jmp .fetch
+.len:
+    cmp byte [rdi+rdx], 0       ; key[operand] must be the end
+    jne .bad
+    jmp .fetch
+.win:
+    mov eax, 1
+    ret
+.bad:
+    xor eax, eax
+    ret
+</listing>
+            <verify setup='rdi=&amp;"{ans}"' expect="eax=1"/>
+            <reject ans="VM4evers"/>
+            <hint>الـ opcodes: 1 = LOAD key[i]، 2 = XOR، 3 = ADD (8-bit)، 4 = CMP، 5 = END-OF-STRING، 0xFF = WIN. كل حرف: LOAD i ← (XOR k أو ADD k) ← CMP t. اعكس: لو XOR: c = t ^ k، لو ADD: c = (t − k) mod 256.</hint>
+            <explain>(0x45^0x13)='V'، (0x75−0x28)='M'، (0x01^0x35)='4'، (0x9B−0x36)='e'، (0x21^0x57)='v'، (0xA9−0x44)='e'، (0x0B^0x79)='r' ← <b>VM4ever</b>. ده جوهر تحليل الـ VM protectors: (1) لاقي الـ dispatcher (fetch + switch)، (2) افهم كل handler، (3) اكتب disassembler للـ bytecode، (4) حلّل البرنامج المفكوك.</explain>
+          </re-task>
+        </div>
+      </section>

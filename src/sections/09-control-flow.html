@@ -1,0 +1,484 @@
+      <section class="section" id="s09" data-part="الجزء 2 · الـ Instructions بالتفصيل" data-nav="التحكم في التدفق" data-icon="🔀" data-keywords="jmp jcc je jne jz jnz jl jg jle jge jb ja jbe jae js jns jo setcc cmovcc if else loop while for do switch jump table short circuit branchless loop jrcxz control flow graph basic block">
+        <div class="section-head">
+          <span class="section-index">09</span>
+          <div>
+            <p class="eyebrow">المرحلة التاسعة · الـ if والـ loops من غير if ولا loops</p>
+            <h2>التحكم في التدفق: Jumps وConditions وLoops وSwitch</h2>
+            <p class="lede">الـ CPU عنده أداة واحدة للتحكم: <b>تغيير RIP</b>. كل <code>if</code> و<code>while</code> و<code>for</code> و<code>switch</code> في الدنيا بيتحول لـ <code>cmp</code> + <b>jump</b>. لما تتعلم تشوف الـ patterns دي، هتبص على الـ graph في IDA وتعرف فورًا "دي loop، ودي if-else، وده switch".</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الـ Jumps <span class="tag">jmp · jcc</span></h3>
+        <p><code>jmp label</code> = <code>goto</code> (من غير شرط). <code>jcc label</code> = اقفز <b>لو الشرط متحقق</b>، والشرط بيتقرا من الـ flags (اللي سابتها آخر <code>cmp</code> أو <code>test</code> أو أي عملية حسابية). الـ jumps مش بتغير الـ flags.</p>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 300" role="img" aria-label="signed vs unsigned conditional jumps">
+            <rect x="380" y="16" width="240" height="56" rx="12" class="d-box2"/>
+            <text x="500" y="40" text-anchor="middle" class="d-tb">cmp a, b</text>
+            <text x="500" y="60" text-anchor="middle" class="d-tx">computes a − b → flags</text>
+            <path class="d-ar-vio d-flow" d="M440,74 C380,110 260,110 230,128"/>
+            <path class="d-ar-vio d-flow" d="M560,74 C620,110 740,110 770,128"/>
+            <path class="d-ar-acc d-flow" d="M500,74 L500,128"/>
+            <rect x="40" y="130" width="330" height="150" rx="14" class="d-box"/>
+            <text x="205" y="156" text-anchor="middle" class="d-tb d-acc">signed (int, long, char)</text>
+            <g font-size="12.5">
+              <text x="60" y="184" class="d-t">jl / jnge   a &lt; b   (SF≠OF)</text>
+              <text x="60" y="206" class="d-t">jle / jng   a ≤ b</text>
+              <text x="60" y="228" class="d-t">jg / jnle   a &gt; b</text>
+              <text x="60" y="250" class="d-t">jge / jnl   a ≥ b   (SF=OF)</text>
+            </g>
+            <rect x="420" y="130" width="160" height="150" rx="14" class="d-box4"/>
+            <text x="500" y="156" text-anchor="middle" class="d-tb d-grn">الاتنين</text>
+            <g font-size="12.5">
+              <text x="440" y="184" class="d-t">je / jz    a = b</text>
+              <text x="440" y="206" class="d-t">jne / jnz  a ≠ b</text>
+              <text x="440" y="228" class="d-t">js   (SF=1)</text>
+              <text x="440" y="250" class="d-t">jo   (OF=1)</text>
+            </g>
+            <rect x="630" y="130" width="330" height="150" rx="14" class="d-box3"/>
+            <text x="795" y="156" text-anchor="middle" class="d-tb d-amb">unsigned (size_t, pointers)</text>
+            <g font-size="12.5">
+              <text x="650" y="184" class="d-t">jb / jnae / jc   a &lt; b  (CF=1)</text>
+              <text x="650" y="206" class="d-t">jbe / jna        a ≤ b</text>
+              <text x="650" y="228" class="d-t">ja / jnbe        a &gt; b</text>
+              <text x="650" y="250" class="d-t">jae / jnb / jnc  a ≥ b  (CF=0)</text>
+            </g>
+          </svg>
+          <figcaption>حيلة الحفظ: <b>L</b>ess / <b>G</b>reater = signed، و<b>B</b>elow / <b>A</b>bove = unsigned. النوع اللي الـ compiler اختاره بيفضح نوع المتغير في الكود الأصلي: <code>jl</code> ⇐ <code>int</code>، <code>jb</code> ⇐ <code>unsigned</code> أو pointer أو <code>size_t</code>.</figcaption>
+        </figure>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الـ jump</th><th>الـ flags</th><th>بعد <code>cmp a, b</code></th><th>بعد <code>test x, x</code></th></tr></thead>
+            <tbody>
+              <tr><td><code>je</code>/<code>jz</code></td><td>ZF=1</td><td>a == b</td><td>x == 0</td></tr>
+              <tr><td><code>jne</code>/<code>jnz</code></td><td>ZF=0</td><td>a != b</td><td>x != 0</td></tr>
+              <tr><td><code>js</code> / <code>jns</code></td><td>SF=1 / 0</td><td>(a−b) سالب</td><td>x &lt; 0 / x ≥ 0</td></tr>
+              <tr><td><code>jl</code> <code>jle</code> <code>jg</code> <code>jge</code></td><td>SF, OF, ZF</td><td>مقارنة signed</td><td><code>jle</code> = x ≤ 0 · <code>jg</code> = x &gt; 0</td></tr>
+              <tr><td><code>jb</code> <code>jbe</code> <code>ja</code> <code>jae</code></td><td>CF, ZF</td><td>مقارنة unsigned</td><td>نادر</td></tr>
+              <tr><td><code>jo</code> / <code>jno</code></td><td>OF</td><td>signed overflow</td><td>—</td></tr>
+              <tr><td><code>jp</code> / <code>jnp</code></td><td>PF</td><td>—</td><td>نادر (مقارنات float: NaN)</td></tr>
+              <tr><td><code>jrcxz</code></td><td>— (بتشوف rcx)</td><td colspan="2">اقفز لو rcx = 0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout tip"><span class="ci">🧠</span><div><strong>جرّبها في حاسبة الـ flags</strong><p>ارجع لحاسبة المرحلة 07 واعمل <code>cmp</code> بين <code>-1</code> و<code>1</code>: هتلاقي <code>jl</code> متحققة (−1 &lt; 1) لكن <code>jb</code> مش متحققة (لأن −1 كـ unsigned = 0xFFFFFFFF أكبر رقم!). ده مصدر ثغرات كتير: مقارنة signed لحجم buffer ممكن تعدّي رقم سالب.</p></div></div>
+
+        <h3 class="sub">الـ if/else: الـ compiler بيعكس الشرط <span class="tag">pattern #1</span></h3>
+        <p>في C بتكتب "لو الشرط، اعمل كذا". في Assembly الأسهل "لو <b>عكس</b> الشرط، اقفز <b>فوق</b> الكود". فـ <code>if (score &gt;= 90)</code> بتبقى <code>cmp score, 89</code> + <code>jle</code> (اقفز لو ≤ 89). عوّد نفسك تعكس الـ jump وإنت بتقرا. اضغط <b>⧉ Graph</b> على أي tab:</p>
+        <compiled file="branches.c" targets="gcc-O0,gcc-O2,msvc-O2" graph note="<b>gcc -O0</b>: الشكل الكلاسيكي — cmp + jle (الشرط معكوس) + jmp للنهاية. <b>gcc -O2</b>: حيلة branchless جميلة: <code>setle al</code> بتطلع 0 أو 1، و<code>lea eax, [66+rax*4]</code> = 66 ('B') أو 70 ('F'). <b>MSVC</b>: <code>cmovge</code>. نفس المنطق، 3 أشكال — والـ decompiler بيرجّعهم كلهم لنفس الـ if.">
+int grade(int score) {
+    if (score >= 90)
+        return 'A';
+    else if (score >= 75)
+        return 'B';
+    return 'F';
+}
+
+int in_range(int a, int b) {
+    return a > 0 && b < 10;
+}
+</compiled>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">⚡</div><h4>Short-circuit (<code>&amp;&amp;</code> و<code>||</code>)</h4><p><code>a &gt; 0 &amp;&amp; b &lt; 10</code>: لو الشرط الأول فشل، التاني مبيتحسبش خالص — قفزة مباشرة للـ "false". شوف <code>in_range</code> في -O0 وMSVC: سلسلة jumps كلها رايحة لنفس الـ label. أما gcc -O2 حسب الاتنين بـ <code>setcc</code> وعمل <code>and</code> (مسموح لأن مفيش side effects).</p></div>
+          <div class="card reveal"><div class="ico">🚀</div><h4>Branchless: <code>setcc</code> و<code>cmovcc</code></h4><p><code>setl al</code> = <code>al = (a &lt; b)</code> (0 أو 1). <code>cmovl eax, ecx</code> = <code>if (a &lt; b) eax = ecx</code> من غير jump. الـ CPU بيحبهم لأن الـ branch prediction الغلط غالي. لما تشوفهم اقراهم كـ ternary: <code>x = cond ? a : b</code>.</p></div>
+        </div>
+        <asm-lab id="s09-lab1" title="max بطريقتين: jump و cmov" setup="rdi=17;rsi=42">
+max2:                       ; rdi = a, rsi = b
+    ; --- version 1: branch ---
+    mov rax, rdi            ; assume a is the max
+    cmp rdi, rsi
+    jge .done1              ; if (a >= b) keep a      (signed!)
+    mov rax, rsi            ; else take b
+.done1:
+    mov rbx, rax            ; keep the result
+    ; --- version 2: branchless ---
+    mov rax, rdi
+    cmp rdi, rsi
+    cmovl rax, rsi          ; if (a < b) rax = b
+    setl cl                 ; cl = (a < b) ? 1 : 0
+    ret
+</asm-lab>
+
+        <h3 class="sub">الـ Loops <span class="tag">pattern #2: الـ back-edge</span></h3>
+        <p>أي <b>jump لورا</b> (لعنوان أصغر) = loop. في الـ graph بيبان سهم راجع لفوق. الـ compilers بيحبوا شكل الـ do-while (الشرط تحت) لأنه jump واحد في كل لفة، فبيحوّلوا الـ <code>for</code>/<code>while</code> لـ: "لو مش هندخل خالص اقفز للنهاية، وإلا loop بالشرط تحت" (اسمها <b>loop rotation</b>):</p>
+        <div class="split-2">
+          <asm-block file="while (i < n) { … }  — كما تتوقعها" graph>
+loop_top:
+    cmp ecx, edx
+    jge loop_end        ; condition at the top
+    ; ... body ...
+    inc ecx
+    jmp loop_top        ; back-edge
+loop_end:
+    ret
+          </asm-block>
+          <asm-block file="نفس الـ loop بعد loop rotation (اللي هتشوفه فعلًا)" graph>
+    cmp ecx, edx
+    jge loop_end        ; guard: skip if 0 iterations
+loop_body:
+    ; ... body ...
+    inc ecx
+    cmp ecx, edx
+    jl loop_body        ; condition at the bottom
+loop_end:
+    ret
+          </asm-block>
+        </div>
+        <p>شوف loop حقيقية من gcc، وشوف clang عمل إيه بنفس الكود — <b>شال الـ loop خالص</b> واستبدلها بمعادلة <code>n(n+1)/2</code> (مكتوبة بشكل ملتوي عشان تتفادى الـ overflow). الـ optimizers أذكى مما تتخيل، فمتتوقعش إن شكل الكود هيطابق الـ source:</p>
+        <compiled file="sum.c" targets="gcc-O1,clang-O2" graph>
+int sum_to(int n) {
+    int s = 0;
+    for (int i = 1; i <= n; i++)
+        s += i;
+    return s;
+}
+</compiled>
+        <div class="callout info"><span class="ci">🔁</span><div><strong><code>loop</code> و<code>jrcxz</code></strong><p><code>loop label</code> = <code>dec rcx</code> + <code>jnz label</code> في instruction واحدة (ومن غير ما تغيّر الـ flags). الـ compilers الحديثة مش بيستخدموها لأنها بطيئة، بس هتشوفها كتير في <b>الـ shellcode والكود المكتوب بإيد</b> (بسبب حجمها: 2 bytes). <code>jrcxz</code> = اقفز لو rcx = 0، بتتحط قبل الـ loop عشان تتفادى 2⁶⁴ لفة لو rcx بدأ بصفر.</p></div></div>
+
+        <h3 class="sub">الـ switch والـ Jump Tables <span class="tag">pattern #3</span></h3>
+        <p>لما الـ cases كتير ومتقاربة، الـ compiler بيعمل <b>جدول عناوين</b> ويقفز للعنوان رقم <code>cmd</code> مباشرة: <code>jmp [table + cmd*8]</code>. ده بالظبط شكل <b>الـ command dispatcher</b> في أي RAT أو backdoor: الـ C2 يبعت رقم الأمر، والـ switch يوديه لـ handler:</p>
+        <compiled file="dispatch.c" targets="gcc-O2,msvc-O2" note="<b>gcc</b>: <code>cmp edi, 5</code> + <code>ja</code> (bounds check بـ <b>unsigned</b> — حيلة: الأرقام السالبة بتبقى ضخمة كـ unsigned فبتترفض كمان)، وبعدها <code>jmp [.L4 + rdi*8]</code> والجدول عبارة عن <code>.quad</code> عناوين. <b>MSVC x64</b>: الجدول فيه <b>4-byte RVAs</b> (offsets من بداية الـ module): بيجيب <code>__ImageBase</code> في rdx، يقرا الـ offset، يجمعه، و<code>jmp rcx</code>. (الـ compiler explorer مبيعرضش بيانات الجدول نفسها تحت <code>$LN11@dispatch</code>.)">
+void cmd_shell(void); void cmd_upload(void); void cmd_download(void);
+void cmd_sleep(void); void cmd_info(void); void cmd_exit(void);
+
+void dispatch(int cmd) {
+    switch (cmd) {
+        case 0: cmd_shell(); break;
+        case 1: cmd_upload(); break;
+        case 2: cmd_download(); break;
+        case 3: cmd_sleep(); break;
+        case 4: cmd_info(); break;
+        case 5: cmd_exit(); break;
+    }
+}
+</compiled>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>إزاي تحلل backdoor dispatcher</strong><p>(1) لاقي الـ indirect jump (<code>jmp rax</code> / <code>jmp [x+rcx*8]</code>). (2) لاقي الـ bounds check قبله (<code>cmp …, 5</code> ⇐ 6 أوامر). (3) IDA غالبًا بيعرف الجدول ويكتب <code>switch 6 cases</code> — لو مقدرش، اقرا الجدول بإيدك. (4) ادخل كل handler وسمّيه حسب الـ APIs اللي بيستخدمها (<code>CreateProcess</code> ⇐ shell، <code>WriteFile</code> ⇐ upload…). ده بيديك قايمة capabilities الـ malware كاملة.</p></div></div>
+        
+        <p>🎬 نفس الـ dispatcher متحرك: أمر جاي من سيرفر الـ C2، الـ bounds check، قراية الجدول، والقفزة للـ handler — وكمان إيه اللي بيحصل لو الأمر غلط:</p>
+        <div class="explorer" data-scene="jumptable"></div>
+
+        <p>لما الـ cases متباعدة (زي 1، 100، 5000) الـ compiler بيستخدم <b>سلسلة مقارنات</b> أو <b>binary search</b> (شجرة من <code>cmp</code> و<code>jg</code>) بدل الجدول. والـ <code>bt</code> trick من المرحلة اللي فاتت للقيم الصغيرة المتفرقة.</p>
+        <asm-lab id="s09-lab2" title="Jump table بنفسك" setup="rdi=2">
+section .data
+table: dq handler0, handler1, handler2, handler3
+
+section .text
+dispatch:                   ; rdi = command number
+    cmp rdi, 3
+    ja .bad                 ; unsigned bounds check
+    lea rdx, [rel table]
+    jmp [rdx+rdi*8]         ; indirect jump through the table
+.bad:
+    mov eax, -1
+    ret
+handler0:
+    mov eax, 100
+    ret
+handler1:
+    mov eax, 200
+    ret
+handler2:
+    mov eax, 300
+    ret
+handler3:
+    mov eax, 400
+    ret
+</asm-lab>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 09</h3></div>
+
+          <quiz id="s09-q1" answer="2">
+            <q><code>cmp eax, 10</code> ثم <code>jge skip</code> ثم كود ثم <code>skip:</code>. الكود ده في C؟</q>
+            <o><code>if (eax &gt;= 10) { كود }</code></o>
+            <o><code>while (eax &lt; 10) { كود }</code></o>
+            <o><code>if (eax &lt; 10) { كود }</code></o>
+            <o><code>if (eax == 10) { كود }</code></o>
+            <good>الـ jump بيعدّي الكود لو eax ≥ 10، يعني الكود بيتنفذ لو eax &lt; 10. اعكس الشرط دايمًا.</good>
+            <bad>الـ jump بيعدّي فوق الكود. إمتى الكود بيتنفذ؟</bad>
+          </quiz>
+          <quiz id="s09-q2" answer="1">
+            <q>دالة بتقارن طول buffer بـ <code>cmp ecx, 100</code> ثم <code>jl ok</code>. لو <code>ecx = -5</code>؟</q>
+            <o>مش هتقفز</o>
+            <o>هتقفز لـ ok لأن −5 &lt; 100 كـ signed — وده ممكن يبقى ثغرة لو ecx حجم</o>
+            <o>crash</o>
+            <o>هتقفز بس لو CF=1</o>
+            <good>jl = signed. الحجم السالب بيعدّي الفحص، وبعدين لو اتحوّل لـ size_t في memcpy = رقم ضخم = buffer overflow. لو الفحص كان jb (unsigned) كان الـ −5 اترفض.</good>
+            <bad>jl بتعامل الأرقام إزاي؟</bad>
+          </quiz>
+          <quiz id="s09-q3" answer="3">
+            <q>في الـ graph بتاع IDA لقيت سهم بيرجع لعنوان <b>أصغر</b>. ده:</q>
+            <o>exception</o>
+            <o>function call</o>
+            <o>return</o>
+            <o>loop (back-edge)</o>
+            <good>أي jump لورا = تكرار. ده أول حاجة بتدور عليها عشان تلاقي الـ decryption loops.</good>
+            <bad>القفز لورا معناه إن الكود ده هيتنفذ تاني.</bad>
+          </quiz>
+          <quiz id="s09-q4" answer="0">
+            <q><code>test eax, eax</code> ثم <code>setne al</code> ثم <code>movzx eax, al</code>. في C؟</q>
+            <o><code>return x != 0;</code> (تحويل لـ bool)</o>
+            <o><code>return !x;</code></o>
+            <o><code>return x;</code></o>
+            <o><code>return -x;</code></o>
+            <good>setne = 1 لو ZF=0 (x مش صفر). ده شكل <code>(bool)x</code> أو <code>!!x</code>.</good>
+            <bad>setne بتحط 1 لو "not equal" يعني النتيجة مش صفر.</bad>
+          </quiz>
+          <quiz id="s09-q5" answer="2">
+            <q><code>cmp edx, 7</code> ثم <code>ja default_case</code> ثم <code>jmp qword ptr [rax+rdx*8]</code>. الـ switch ده فيه كام case متتابعة؟</q>
+            <o>7</o>
+            <o>9</o>
+            <o>8 (من 0 لـ 7)</o>
+            <o>مش معروف</o>
+            <good>القيم المسموحة 0..7 = 8 entries في الجدول (و ja بيحوّل أي حاجة أكبر — أو سالبة — للـ default).</good>
+            <bad>ja بيرفض اللي أكبر من 7 (unsigned).</bad>
+          </quiz>
+          <quiz id="s09-q6" answer="1">
+            <q><code>cmovg eax, ecx</code> بعد <code>cmp ecx, eax</code>. في C؟</q>
+            <o><code>eax = min(eax, ecx)</code></o>
+            <o><code>eax = max(eax, ecx)</code> — لو ecx أكبر، خده</o>
+            <o><code>eax = ecx</code></o>
+            <o><code>if (ecx &gt; eax) return;</code></o>
+            <good>cmp ecx, eax بيحسب ecx − eax، وcmovg = لو ecx &gt; eax حط ecx في eax ← max.</good>
+            <bad>cmovg = mov لو "greater" حسب الـ cmp اللي قبلها (ecx مقابل eax).</bad>
+          </quiz>
+          <quiz id="s09-q7" answer="3">
+            <q>الـ instruction <code>loop .L1</code> بتعمل إيه بالظبط؟</q>
+            <o>بتقفز دايمًا</o>
+            <o><code>inc rcx</code> + قفز</o>
+            <o>بتقارن rcx بصفر من غير ما تغيّره</o>
+            <o><code>rcx = rcx − 1</code>، وتقفز لو rcx ≠ 0 (ومن غير ما تغيّر الـ flags)</o>
+            <good>بتشوفها كتير في الـ shellcode والـ decoders المكتوبة بإيد لأن حجمها 2 bytes بس.</good>
+            <bad>loop مربوطة بـ rcx كعدّاد تنازلي.</bad>
+          </quiz>
+          <quiz id="s09-q8" answer="0">
+            <q>ليه الـ compiler بيحوّل <code>while</code> لشكل الشرط تحت (loop rotation)؟</q>
+            <o>عشان كل لفة يبقى فيها jump واحد بس بدل اتنين (أسرع)</o>
+            <o>عشان يصغّر الملف</o>
+            <o>عشان الـ debugger</o>
+            <o>ده مطلوب في C standard</o>
+            <good>الشكل العادي فيه jcc فوق + jmp تحت في كل لفة. الـ rotated فيه jcc واحدة تحت، وguard واحد قبل الدخول.</good>
+            <bad>عدّ الـ jumps اللي بتتنفذ في كل لفة في الشكلين.</bad>
+          </quiz>
+
+          <challenge id="s09-c1" title="FizzBuzz بالـ Assembly" level="2" io>
+            <desc>اطبع الأرقام من 1 لـ 15، كل رقم في سطر — بس لو بيقبل القسمة على 15 اطبع <code>FizzBuzz</code>، على 3 بس <code>Fizz</code>، على 5 بس <code>Buzz</code>. استخدم <code>div</code> للباقي (أو عدّادات — حلّك!).</desc>
+            <starter>
+default rel
+section .data
+fizz:     db "Fizz", 0
+buzz:     db "Buzz", 0
+fizzbuzz: db "FizzBuzz", 0
+
+section .text
+global _start
+_start:
+    mov ebx, 1              ; i = 1  (rbx is safe across io.inc calls)
+    ; loop while i <= 15 ...
+
+    xor edi, edi
+    call exit
+</starter>
+            <expected>
+1
+2
+Fizz
+4
+Buzz
+Fizz
+7
+8
+Fizz
+Buzz
+11
+Fizz
+13
+14
+FizzBuzz
+</expected>
+            <solution>
+default rel
+section .data
+fizz:     db "Fizz", 0
+buzz:     db "Buzz", 0
+fizzbuzz: db "FizzBuzz", 0
+
+section .text
+global _start
+_start:
+    mov ebx, 1              ; i = 1
+.loop:
+    mov eax, ebx
+    xor edx, edx
+    mov ecx, 15
+    div ecx
+    test edx, edx           ; i % 15 == 0 ?
+    jz .fb
+    mov eax, ebx
+    xor edx, edx
+    mov ecx, 3
+    div ecx
+    test edx, edx           ; i % 3 == 0 ?
+    jz .f
+    mov eax, ebx
+    xor edx, edx
+    mov ecx, 5
+    div ecx
+    test edx, edx           ; i % 5 == 0 ?
+    jz .b
+    mov edi, ebx
+    call print_int
+    jmp .next
+.fb:
+    lea rdi, [fizzbuzz]
+    call print_str
+    jmp .next
+.f:
+    lea rdi, [fizz]
+    call print_str
+    jmp .next
+.b:
+    lea rdi, [buzz]
+    call print_str
+.next:
+    call print_nl
+    inc ebx
+    cmp ebx, 15
+    jbe .loop
+    xor edi, edi
+    call exit
+</solution>
+          </challenge>
+
+          <lab-challenge id="s09-lc1" title="clamp(x, lo, hi) من غير jumps" level="2" forbid="jcc,jmp">
+            <desc>رجّع في <code>rax</code>: <code>lo</code> لو <code>x &lt; lo</code>، و<code>hi</code> لو <code>x &gt; hi</code>، وإلا <code>x</code>. (<code>rdi</code> = x، <code>rsi</code> = lo، <code>rdx</code> = hi — كلهم signed). من غير أي jump — استخدم <code>cmov</code>.</desc>
+            <starter>
+clamp:
+    mov rax, rdi
+    ret
+</starter>
+            <solution>
+clamp:
+    mov rax, rdi
+    cmp rax, rsi
+    cmovl rax, rsi          ; if (x < lo) x = lo
+    cmp rax, rdx
+    cmovg rax, rdx          ; if (x > hi) x = hi
+    ret
+</solution>
+            <test setup="rdi=5;rsi=0;rdx=10" expect="rax=5"/>
+            <test setup="rdi=-7;rsi=0;rdx=10" expect="rax=0"/>
+            <test setup="rdi=99;rsi=0;rdx=10" expect="rax=10"/>
+            <test setup="rdi=-50;rsi=-20;rdx=-10" expect="rax=-20" label="كلهم سالب"/>
+          </lab-challenge>
+          <lab-challenge id="s09-lc2" title="عدّ مرات ظهور حرف" level="2">
+            <desc><code>rdi</code> = string منتهية بصفر، <code>sil</code> = حرف. رجّع في <code>rax</code> عدد مرات ظهور الحرف. (loop + <code>movzx</code> + <code>cmp</code> + jumps.)</desc>
+            <starter>
+count_char:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+count_char:
+    xor eax, eax            ; count = 0
+.next:
+    movzx ecx, byte [rdi]
+    test ecx, ecx
+    jz .done                ; end of string
+    cmp cl, sil
+    jne .skip
+    inc rax                 ; match
+.skip:
+    inc rdi
+    jmp .next
+.done:
+    ret
+</solution>
+            <test setup='rdi=&amp;"hello world";rsi=0x6F' expect="rax=2" label="'o' في hello world"/>
+            <test setup='rdi=&amp;"aaaa";rsi=0x61' expect="rax=4"/>
+            <test setup='rdi=&amp;"";rsi=0x61' expect="rax=0"/>
+            <test setup='rdi=&amp;"C2C2C2";rsi=0x32' expect="rax=3"/>
+          </lab-challenge>
+          <lab-challenge id="s09-lc3" title="Collatz steps" level="2">
+            <desc>رجّع في <code>rax</code> عدد الخطوات اللي <code>n</code> (في <code>rdi</code>، ≥ 1) محتاجها يوصل لـ 1: لو زوجي <code>n = n/2</code>، لو فردي <code>n = 3n+1</code>. (استخدم <code>test</code> للزوجي/الفردي، و<code>shr</code> و<code>lea</code> بدل div وmul!)</desc>
+            <starter>
+collatz:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+collatz:
+    xor eax, eax            ; steps = 0
+.next:
+    cmp rdi, 1
+    je .done
+    inc rax
+    test dil, 1
+    jnz .odd
+    shr rdi, 1              ; n /= 2
+    jmp .next
+.odd:
+    lea rdi, [rdi+rdi*2+1]  ; n = 3n + 1
+    jmp .next
+.done:
+    ret
+</solution>
+            <test setup="rdi=1" expect="rax=0"/>
+            <test setup="rdi=6" expect="rax=8"/>
+            <test setup="rdi=27" expect="rax=111"/>
+          </lab-challenge>
+
+          <re-task id="s09-re1" title="Crackme: 3 شروط" level="2" answer="2600" norm="int" bits="32">
+            <desc>الدالة بترجع 1 لو الـ serial (في <code>edi</code>) صح. اقرا الشروط (افتح ⧉ Graph أو 🔬 Debug لو حبيت) ولاقي الـ serial الوحيد الصح.</desc>
+            <listing>
+check_serial:
+    xor eax, eax
+    cmp edi, 2500
+    jbe .fail               ; must be > 2500
+    cmp edi, 2700
+    jae .fail               ; must be < 2700
+    mov ecx, edi
+    and ecx, 0xFF
+    cmp ecx, 0x28
+    jne .fail               ; low byte must be 0x28
+    mov eax, 1
+.fail:
+    ret
+</listing>
+            <verify setup="edi={ans}" expect="eax=1"/>
+            <hint>الرقم بين 2501 و2699، وآخر byte فيه = 0x28 = 40. يعني <code>x = 256×k + 40</code>.</hint>
+            <explain>المضاعفات: 256×9 + 40 = 2344 (صغير)، 256×10 + 40 = <b>2600</b> ✓، 256×11 + 40 = 2856 (كبير). <code>jbe</code>/<code>jae</code> = مقارنات unsigned. لاحظ إن الكود كله "شروط فشل" بتقفز لنفس الـ label — شكل الـ <code>&amp;&amp;</code> المتسلسل.</explain>
+          </re-task>
+          <re-task id="s09-re2" title="الـ dispatcher رجّع كام؟" level="1" answer="300" norm="int">
+            <desc>في المعمل بتاع الـ jump table فوق: لو <code>rdi = 2</code> الدالة بترجع كام في <code>eax</code>؟ وجرّب تغيّر الـ setup في المعمل لـ <code>rdi = 7</code> وشوف هيحصل إيه.</desc>
+            <listing>
+section .data
+table: dq handler0, handler1, handler2, handler3
+
+section .text
+dispatch:
+    cmp rdi, 3
+    ja .bad
+    lea rdx, [rel table]
+    jmp [rdx+rdi*8]
+.bad:
+    mov eax, -1
+    ret
+handler0:
+    mov eax, 100
+    ret
+handler1:
+    mov eax, 200
+    ret
+handler2:
+    mov eax, 300
+    ret
+handler3:
+    mov eax, 400
+    ret
+</listing>
+            <verify setup="rdi=2" expect="eax={ans}"/>
+            <hint>table[2] = handler2.</hint>
+            <explain><code>rdi = 2</code> ≤ 3 فبيعدّي الـ bounds check، وبيقفز لـ <code>table[2]</code> = <code>handler2</code> اللي بيرجع 300. ولو <code>rdi = 7</code> (أو أي سالب!) الـ <code>ja</code> بيوديه لـ <code>.bad</code> ويرجع −1.</explain>
+          </re-task>
+        </div>
+      </section>

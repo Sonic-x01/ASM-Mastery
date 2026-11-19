@@ -1,0 +1,340 @@
+      <section class="section" id="s01" data-part="الجزء 1 · الآلة من جوه" data-nav="الكمبيوتر من جوه" data-icon="🖥️" data-keywords="cpu alu control unit registers ram bus fetch decode execute rip isa cisc risc x86 history 8086 386 amd64 long mode protected mode real mode rings ring 0 ring 3 kernel user assembler disassembler decompiler machine code">
+        <div class="section-head">
+          <span class="section-index">01</span>
+          <div>
+            <p class="eyebrow">المرحلة الأولى · الجزء 1 يبدأ</p>
+            <h2>الكمبيوتر من جوه: الـ CPU والذاكرة ودورة التنفيذ</h2>
+            <p class="lede">قبل أي instruction، لازم تبني في دماغك صورة صح للآلة: <b>CPU</b> بيقرا <b>bytes</b> من <b>الذاكرة</b> وينفّذها واحدة ورا التانية. كل حاجة في الكورس — الـ stack، الـ calls، الـ shellcode، الـ exploits — هي مجرد تطبيقات للصورة البسيطة دي.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الصورة الكبيرة <span class="tag">CPU ↔ RAM</span></h3>
+        <p>الكمبيوتر في جوهره حاجتين: <b>الـ CPU</b> اللي بيحسب، و<b>الذاكرة (RAM)</b> اللي شايلة الكود والبيانات. الاتنين متوصلين بـ <b>bus</b>. الـ CPU مبيعرفش حاجة اسمها "متغير" أو "دالة" أو "string" — بيعرف <b>عناوين</b> و<b>bytes</b> بس.</p>
+
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 400" role="img" aria-label="الـ CPU والذاكرة والـ bus">
+            <rect x="20" y="20" width="440" height="360" rx="18" class="d-box"/>
+            <text x="40" y="52" class="d-tb d-acc">CPU (core)</text>
+            <rect x="40" y="70" width="190" height="120" rx="12" class="d-box2"/>
+            <text x="135" y="98" text-anchor="middle" class="d-tb">Control Unit</text>
+            <text x="135" y="122" text-anchor="middle" class="d-ts ar">بيقرا الـ instruction</text>
+            <text x="135" y="142" text-anchor="middle" class="d-ts ar">ويفكّها (decode)</text>
+            <text x="135" y="170" text-anchor="middle" class="d-tx">RIP → next instruction</text>
+            <rect x="250" y="70" width="190" height="120" rx="12" class="d-box3"/>
+            <text x="345" y="98" text-anchor="middle" class="d-tb">ALU</text>
+            <text x="345" y="122" text-anchor="middle" class="d-ts ar">جمع، طرح، AND، XOR</text>
+            <text x="345" y="142" text-anchor="middle" class="d-ts ar">shift، مقارنة</text>
+            <text x="345" y="170" text-anchor="middle" class="d-tx">→ results + FLAGS</text>
+            <rect x="40" y="206" width="400" height="104" rx="12" class="d-box4"/>
+            <text x="56" y="230" class="d-tb">Registers</text><text x="424" y="230" class="d-ts ar">أسرع تخزين — جوه الـ CPU نفسه</text>
+            <g class="d-ts" font-size="11.5">
+              <text x="56" y="256">RAX</text><text x="106" y="256">RBX</text><text x="156" y="256">RCX</text><text x="206" y="256">RDX</text><text x="256" y="256">RSI</text><text x="306" y="256">RDI</text><text x="356" y="256">RSP</text><text x="406" y="256">RBP</text>
+              <text x="56" y="278">R8</text><text x="106" y="278">R9</text><text x="156" y="278">R10</text><text x="206" y="278">…</text><text x="256" y="278">R15</text>
+              <text x="306" y="278" class="d-acc">RIP</text><text x="356" y="278" class="d-amb">RFLAGS</text>
+            </g>
+            <text x="56" y="300" class="d-tx">16 × 64-bit general purpose + instruction pointer + flags</text>
+            <rect x="40" y="322" width="400" height="42" rx="10" class="d-dim"/>
+            <text x="240" y="348" text-anchor="middle" class="d-ts ar">L1 / L2 / L3 Cache — نسخ سريعة من الـ RAM (شفافة عنك)</text>
+
+            <text x="550" y="120" text-anchor="middle" class="d-ts">address bus</text>
+            <path class="d-ar-acc d-flow" d="M462,135 L638,135"/>
+            <path d="M630,129 L640,135 L630,141" class="d-ar-acc"/>
+            <text x="550" y="200" text-anchor="middle" class="d-ts">data bus</text>
+            <path class="d-ar-vio d-flow" d="M638,215 L462,215"/>
+            <path class="d-ar-vio d-flow" d="M462,232 L638,232" style="animation-direction:reverse"/>
+            <text x="550" y="262" text-anchor="middle" class="d-tx">read / write</text>
+
+            <rect x="640" y="20" width="340" height="360" rx="18" class="d-box2"/>
+            <text x="660" y="52" class="d-tb d-vio">RAM</text><text x="962" y="52" class="d-ts ar">مصفوفة bytes ضخمة</text>
+            <g font-size="12">
+              <rect x="660" y="70" width="300" height="56" rx="8" class="d-box"/>
+              <text x="672" y="92" class="d-t">0x401000  48 89 E5 B8 01 …</text><text x="948" y="114" class="d-ts ar">.text — الكود (bytes الـ instructions)</text>
+              <rect x="660" y="136" width="300" height="56" rx="8" class="d-box4"/>
+              <text x="672" y="158" class="d-t">0x403000  48 65 6C 6C 6F …</text><text x="948" y="180" class="d-ts ar">.data — بيانات ("Hello")</text>
+              <rect x="660" y="202" width="300" height="56" rx="8" class="d-box3"/>
+              <text x="672" y="224" class="d-t">heap ↓↑</text><text x="948" y="246" class="d-ts ar">ذاكرة ديناميكية (malloc)</text>
+              <rect x="660" y="268" width="300" height="96" rx="8" class="d-box5"/>
+              <text x="672" y="290" class="d-t">0x7FFFFFFFE000  stack</text><text x="948" y="312" class="d-ts ar">الـ stack — متغيرات محلية وعناوين رجوع</text>
+              <text x="948" y="340" class="d-tx ar">كل byte ليه عنوان (address)</text>
+            </g>
+          </svg>
+          <figcaption>الـ CPU بيبعت <b>عنوان</b> على الـ address bus، وبياخد أو بيبعت <b>bytes</b> على الـ data bus. الكود والبيانات الاتنين bytes في نفس الذاكرة — ده اسمه <b>von Neumann architecture</b>، وده السبب إن الـ malware يقدر يكتب كود في الذاكرة ويقفز عليه.</figcaption>
+        </figure>
+
+        <div class="grid-3">
+          <div class="card reveal"><div class="ico">⚡</div><h4>Registers</h4><p>خانات تخزين جوه الـ CPU نفسه، كل واحدة <b>64-bit</b>. أسرع من الـ RAM بمئات المرات. الـ CPU بيعمل كل حساباته عليها تقريبًا.</p></div>
+          <div class="card reveal"><div class="ico">🧮</div><h4>ALU</h4><p>الوحدة اللي بتحسب: جمع، طرح، ضرب، عمليات bits. بعد كل عملية بتسجّل "معلومات عن النتيجة" في <b>RFLAGS</b> (صفر؟ سالب؟ حصل overflow؟).</p></div>
+          <div class="card reveal"><div class="ico">🧭</div><h4>RIP</h4><p>الـ <b>Instruction Pointer</b>: عنوان الـ instruction الجاية. أي تحكم في البرنامج (jump، call، ret، exploit) هو في الآخر <b>تغيير قيمة RIP</b>.</p></div>
+        </div>
+
+        <h3 class="sub">دورة التنفيذ: Fetch → Decode → Execute <span class="tag">قلب كل حاجة</span></h3>
+        <p>الـ CPU بيعمل نفس اللفة مليارات المرات في الثانية:</p>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 300" role="img" aria-label="دورة fetch decode execute">
+            <g class="fde">
+              <rect x="40" y="70" width="270" height="150" rx="16" class="d-box"/>
+              <text x="175" y="110" text-anchor="middle" class="d-tb d-acc">① FETCH</text>
+              <text x="175" y="140" text-anchor="middle" class="d-ts ar">اقرا الـ bytes اللي عند RIP</text>
+              <text x="175" y="170" text-anchor="middle" class="d-t">[0x401000] → B8 01 00 00 00</text>
+            </g>
+            <g class="fde d2">
+              <rect x="365" y="70" width="270" height="150" rx="16" class="d-box2"/>
+              <text x="500" y="110" text-anchor="middle" class="d-tb d-vio">② DECODE</text>
+              <text x="500" y="140" text-anchor="middle" class="d-ts ar">افهم الـ instruction وطولها</text>
+              <text x="500" y="170" text-anchor="middle" class="d-t">B8 = mov eax, imm32 (5 bytes)</text>
+              <text x="500" y="198" text-anchor="middle" class="d-amb" font-size="12">RIP ← RIP + 5 = 0x401005</text>
+            </g>
+            <g class="fde d3">
+              <rect x="690" y="70" width="270" height="150" rx="16" class="d-box3"/>
+              <text x="825" y="110" text-anchor="middle" class="d-tb d-amb">③ EXECUTE</text>
+              <text x="825" y="140" text-anchor="middle" class="d-ts ar">نفّذ وغيّر الحالة</text>
+              <text x="825" y="170" text-anchor="middle" class="d-t">EAX ← 1</text>
+              <text x="825" y="198" text-anchor="middle" class="d-ts ar">(registers / memory / flags)</text>
+            </g>
+            <path class="d-ar-acc d-flow" d="M312,145 L360,145"/><path d="M352,139 L362,145 L352,151" class="d-ar-acc"/>
+            <path class="d-ar-acc d-flow" d="M637,145 L685,145"/><path d="M677,139 L687,145 L677,151" class="d-ar-acc"/>
+            <path class="d-ar-vio d-flow" d="M825,222 C825,275 175,275 175,222"/><path d="M169,230 L175,220 L181,230" class="d-ar-vio"/>
+            <text x="500" y="285" text-anchor="middle" class="d-ts ar">وبعدين من الأول على الـ instruction الجاية… للأبد</text>
+          </svg>
+          <figcaption>نقطة مهمة: أثناء التنفيذ، <b>RIP بيكون بيشاور على الـ instruction اللي بعدها</b>. عشان كده الـ <code>call</code> بتعمل push لـ RIP (عنوان الرجوع)، والعناوين النسبية (<code>[rip+0x1234]</code> و<code>jmp</code>) بتتحسب من <b>آخر</b> الـ instruction الحالية.</figcaption>
+        </figure>
+
+        <div class="callout info"><span class="ci">🏎️</span><div><strong>الحقيقة أعقد… بس مش مهمة لك دلوقتي</strong><p>المعالجات الحديثة بتعمل <b>pipelining</b> و<b>out-of-order execution</b> و<b>branch prediction</b> — بتنفذ عشرات الـ instructions بالتوازي. لكنها بتضمن إن <b>النتيجة النهائية</b> تبان كأن كل instruction اتنفذت لوحدها بالترتيب. الـ debugger والـ disassembler بيوروك النموذج المتسلسل ده، وهو اللي هتفكر بيه 99% من الوقت. (التفاصيل دي بتهم في ثغرات زي Spectre وفي الـ timing attacks.)</p></div></div>
+
+        
+        <p>🎬 شوف الدورة دي متحركة على 4 instructions حقيقية: اضغط <b>▶ PLAY</b> أو <b>STEP</b>، وتابع الـ bytes وهي طالعة من الـ RAM للـ CPU، والـ decoder بيفهمها، والـ registers بتتغير:</p>
+        <div class="explorer" data-scene="fetch"></div>
+
+        <h3 class="sub">شوفها بعينك: أول معمل <span class="tag">LAB</span></h3>
+        <p>البرنامج ده 6 instructions. اضغط <b>Step</b> (<kbd>F7</kbd>) وراقب حاجتين: <b>RIP</b> بيزيد بمقدار طول كل instruction (بص على عمود الـ bytes)، والـ register اللي بيتغير بيولّع بلون مختلف. متقلقش من معنى الـ instructions دلوقتي — هنفصّلها كلها.</p>
+        <asm-lab id="s01-lab1" title="RIP بيمشي على الـ bytes">
+start:
+    mov eax, 1          ; 5 bytes  -> RIP += 5
+    add eax, 2          ; 3 bytes  -> eax = 3
+    push rax            ; 1 byte   -> the stack grows
+    pop rbx             ; 1 byte   -> rbx = 3
+    nop                 ; 1 byte   -> does nothing
+    ret                 ; return to the caller
+</asm-lab>
+        <div class="callout lab-tip"><span class="ci">👀</span><div><strong>لاحظ في المعمل</strong><p>عمود العناوين: <code>401000</code> ← <code>401005</code> ← <code>401008</code> ← <code>401009</code>… الفرق بين كل عنوان والتاني = عدد الـ bytes. الـ x86 instructions <b>طولها متغير</b> من 1 لـ 15 byte — ودي من أهم الحاجات اللي بتصعّب الـ disassembly (هنشوف ليه في مرحلة الـ encoding).</p></div></div>
+
+        <h3 class="sub">مستويات اللغة: من C لحد الـ bytes <span class="tag">compile ↔ reverse</span></h3>
+        <div class="pipeline">
+          <div class="stage"><b>source.c</b><code>return a+b+c;</code><small>الكود اللي المبرمج (أو مطوّر الـ malware) كتبه</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>compiler</b><code>gcc / MSVC / clang</code><small>بيحوّل C لـ Assembly (ويعمل optimization)</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>assembler</b><code>as / NASM / MASM</code><small>بيحوّل كل instruction لـ bytes</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>linker</b><code>ld / link.exe</code><small>بيجمع الأجزاء في EXE / ELF</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>loader + CPU</b><code>RIP → bytes</code><small>الـ OS بيحمّل الملف في الذاكرة والـ CPU ينفّذ</small></div>
+        </div>
+        <div class="pipeline">
+          <div class="stage"><b>bytes</b><code>8D 04 37 01 D0 C3</code><small>كل اللي معاك في تحليل الـ malware</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>disassembler</b><code>IDA / Ghidra / objdump</code><small>بيرجّع الـ bytes لـ Assembly — ده دقيق ومباشر</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>decompiler</b><code>Hex-Rays / Ghidra</code><small>بيخمّن C من الـ Assembly — تقريبي وممكن يغلط</small></div>
+          <span class="arrow">→</span>
+          <div class="stage"><b>أنت</b><code>فهم + تسمية</code><small>بتحوّل الـ pseudo-code لفهم: "ده بيفك تشفير الـ config"</small></div>
+        </div>
+        <p>الـ compilation <b>بيرمي معلومات</b>: أسماء المتغيرات، الأنواع، الـ comments، وأحيانًا شكل الـ loops نفسه. عشان كده الرجوع مش عملية عكسية مثالية — هو <b>تحقيق</b>. ده بالظبط شغلك كـ reverser. شوف نفس الدالة الصغيرة دي طلعت إيه من 3 compilers حقيقيين:</p>
+
+        <compiled file="add3.c" targets="gcc-O0,gcc-O2,msvc-O2,clang-O2" note="بدّل بين الـ tabs: <b>gcc -O0</b> بيحط كل متغير على الـ stack (سهل تقراه بس طويل)، و<b>-O2</b> بيستخدم الـ registers مباشرة. لاحظ كمان إن MSVC (Windows) بياخد الـ arguments في <code>ecx, edx, r8d</code> وgcc (Linux) في <code>edi, esi, edx</code> — ده الـ calling convention، ليه مرحلة كاملة.">
+int add3(int a, int b, int c) {
+    return a + b + c;
+}
+</compiled>
+
+        <p>وآخر خطوة: الـ assembler بيحوّل كل سطر لـ bytes. اضغط <b>⚙ Bytes</b> على المثال ده عشان تشوف الـ machine code، و<b>▶ تشغيل</b> عشان يتنفذ فعلًا على Linux، و<b>🔬 Debug</b> عشان تمشي فيه خطوة بخطوة:</p>
+        <nasm-example file="first.asm" expect-exit="42">
+; The smallest useful Linux program: exit with code 42.
+; Run it, then press "Bytes" to see the machine code.
+section .text
+global _start
+_start:
+    mov eax, 60         ; syscall number 60 = exit
+    mov edi, 42         ; first argument = exit code
+    syscall             ; ask the Linux kernel to do it
+</nasm-example>
+        <p>المخرجات فاضية، بس الـ <b>exit code = 42</b>. البرنامج ده كله 12 byte: <code>B8 3C 00 00 00</code> <code>BF 2A 00 00 00</code> <code>0F 05</code>. لاحظ إن <code>3C</code> = 60 و<code>2A</code> = 42 بالـ hex، ومكتوبين <b>بالمقلوب</b> (الـ byte الصغير الأول) — ده الـ little-endian اللي هنفهمه في المرحلة الجاية.</p>
+
+        <h3 class="sub">x86: تاريخ بيفسر الغرابة <span class="tag">ليه eax و ax و al؟</span></h3>
+        <div class="timeline">
+          <div class="tl-item"><b>1978</b><span>Intel 8086</span><small>16-bit. registers اسمها AX وBX… والذاكرة segments.</small></div>
+          <div class="tl-item"><b>1985</b><span>Intel 80386</span><small>32-bit (IA-32): ظهرت EAX (Extended AX) والـ protected mode والـ paging.</small></div>
+          <div class="tl-item"><b>2003</b><span>AMD64 (Opteron)</span><small>AMD مدّت x86 لـ 64-bit: RAX وR8–R15 والـ RIP-relative addressing.</small></div>
+          <div class="tl-item"><b>2004</b><span>Intel 64</span><small>Intel تبنّت نفس الـ ISA (EM64T). الأسماء: x86-64 = AMD64 = Intel 64 = x64.</small></div>
+          <div class="tl-item"><b>النهاردة</b><span>x86-64</span><small>كل instruction قديمة لسه شغالة (backward compatibility) — عشان كده الـ ISA ضخم ومليان استثناءات.</small></div>
+        </div>
+        <p>الـ x86 معمارية <b>CISC</b> (Complex Instruction Set): instructions كتير، طولها متغير، وبعضها بيعمل حاجات كبيرة (زي <code>rep movsb</code> اللي بتنسخ ذاكرة كاملة). العكس <b>RISC</b> (زي ARM): instructions قليلة، طولها ثابت (4 bytes)، والذاكرة بتتقرا/تتكتب بـ instructions مخصوصة بس. هنقارن الاتنين في مرحلة ARM64.</p>
+
+        <h3 class="sub">أوضاع الـ CPU والـ Privilege Rings <span class="tag">user vs kernel</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الوضع</th><th>الحجم</th><th>فين بتشوفه</th></tr></thead>
+            <tbody>
+              <tr><td><b>Real mode</b></td><td>16-bit</td><td>أول ما الجهاز يقوم (BIOS / boot sectors / bootkits القديمة)</td></tr>
+              <tr><td><b>Protected mode</b></td><td>32-bit</td><td>أنظمة 32-bit (Windows XP 32-bit…)</td></tr>
+              <tr><td><b>Long mode — 64-bit</b></td><td>64-bit</td><td>Windows / Linux الحديثة: الكود الـ x64</td></tr>
+              <tr><td><b>Long mode — compatibility</b></td><td>32-bit</td><td>برامج 32-bit على Windows 64-bit (<b>WoW64</b>) — نسبة كبيرة من الـ malware لسه 32-bit!</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 300" role="img" aria-label="Privilege rings">
+            <circle cx="250" cy="150" r="135" class="d-box"/>
+            <circle cx="250" cy="150" r="100" class="d-dim"/>
+            <circle cx="250" cy="150" r="68" class="d-dim"/>
+            <circle cx="250" cy="150" r="40" class="d-box5"/>
+            <text x="250" y="146" text-anchor="middle" class="d-tb">Ring 0</text>
+            <text x="250" y="164" text-anchor="middle" class="d-tx">kernel</text>
+            <text x="250" y="102" text-anchor="middle" class="d-tx">ring 1</text>
+            <text x="250" y="66" text-anchor="middle" class="d-tx">ring 2</text>
+            <text x="250" y="34" text-anchor="middle" class="d-ts d-acc">Ring 3 — user</text>
+            <text x="975" y="70" text-anchor="end" class="d-tb d-acc">Ring 3 (user mode)</text>
+            <text x="975" y="95" class="d-ts ar">برامجك، المتصفح… والـ malware العادي</text>
+            <text x="975" y="118" class="d-ts ar">مينفعش يلمس الـ hardware أو ذاكرة الـ kernel مباشرة</text>
+            <path class="d-ar-amb d-flow" d="M560,150 L420,150"/>
+            <text x="975" y="155" text-anchor="end" class="d-t d-amb">syscall / sysenter / int 0x80</text>
+            <text x="975" y="178" class="d-ts ar">الباب الرسمي الوحيد للـ kernel: "اعمل لي write / open / alloc"</text>
+            <text x="975" y="222" text-anchor="end" class="d-tb d-red">Ring 0 (kernel mode)</text>
+            <text x="975" y="247" class="d-ts ar">الـ OS والـ drivers… والـ rootkits</text>
+            <text x="975" y="270" class="d-ts ar">instructions زي hlt وcli وmov cr3 مسموحة هنا بس</text>
+          </svg>
+          <figcaption>Rings 1 و2 موجودين في الـ hardware بس Windows وLinux مش بيستخدموهم. أي برنامج user-mode محتاج يعمل حاجة "حقيقية" (ملف، شبكة، process) لازم يطلبها من الـ kernel بـ <b>syscall</b>.</figcaption>
+        </figure>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>ليه ده يهمك كمحلل؟</strong><p>كل اللي الـ malware بيعمله "بجد" (يقرا ملفات، يتصل بـ C2، يحقن في process تاني) بيعدّي في الآخر على syscalls. على Windows، البرامج بتنادي الـ API (زي <code>CreateFileW</code>) اللي بتنزل لـ <code>ntdll.dll</code> اللي فيها الـ <code>syscall</code> الحقيقية. الـ malware المتقدم ساعات بيعمل <b>direct syscalls</b> بنفسه عشان يتهرب من الـ EDR hooks — هنفهم ده في مرحلة Windows Internals.</p></div></div>
+
+        
+        <p>🎬 ودي رحلة <code>syscall</code> كاملة: برنامج بيطبع سطر ويخرج — من تجهيز الـ registers، للانتقال لـ Ring 0، لحد الرجوع بالنتيجة:</p>
+        <div class="explorer" data-scene="syscall"></div>
+
+        <h3 class="sub">هتقابل إيه فعلًا؟ إحصائيات من binaries حقيقية <span class="tag">data</span></h3>
+        <p>الـ x86 فيه أكتر من ألف mnemonic (أغلبهم SIMD)، بس محتاج تعرفهم كلهم؟ لأ. حللنا <b>1,027,081 instruction</b> من 6 DLLs أساسية في Windows 10 x64 (<code>ntdll</code>، <code>kernel32</code>، <code>kernelbase</code>، <code>user32</code>، <code>advapi32</code>، <code>ws2_32</code>) بـ <code>objdump</code>. النتيجة:</p>
+        <div class="chart">
+          <h4>أكتر الـ instructions استخدامًا في كود Windows حقيقي</h4>
+          <div class="c-sub">نسبة من إجمالي الـ instructions (من غير الـ int3 padding بين الدوال) · المجموع التراكمي لأول 17 = 91.8%</div>
+          <div class="bar-row" style="--w:100%"><span class="bn">mov</span><span class="bt"><span class="bf"></span></span><span class="bp2">34.9%</span></div>
+          <div class="bar-row" style="--w:19.2%"><span class="bn">lea</span><span class="bt"><span class="bf"></span></span><span class="bp2">6.7%</span></div>
+          <div class="bar-row jmp" style="--w:18.3%"><span class="bn">call</span><span class="bt"><span class="bf"></span></span><span class="bp2">6.4%</span></div>
+          <div class="bar-row" style="--w:17.3%"><span class="bn">test</span><span class="bt"><span class="bf"></span></span><span class="bp2">6.0%</span></div>
+          <div class="bar-row jmp" style="--w:13.7%"><span class="bn">je</span><span class="bt"><span class="bf"></span></span><span class="bp2">4.8%</span></div>
+          <div class="bar-row" style="--w:13.2%"><span class="bn">cmp</span><span class="bt"><span class="bf"></span></span><span class="bp2">4.6%</span></div>
+          <div class="bar-row jmp" style="--w:12.4%"><span class="bn">jmp</span><span class="bt"><span class="bf"></span></span><span class="bp2">4.3%</span></div>
+          <div class="bar-row" style="--w:10.9%"><span class="bn">xor</span><span class="bt"><span class="bf"></span></span><span class="bp2">3.8%</span></div>
+          <div class="bar-row jmp" style="--w:9.5%"><span class="bn">jne</span><span class="bt"><span class="bf"></span></span><span class="bp2">3.3%</span></div>
+          <div class="bar-row" style="--w:8.5%"><span class="bn">add</span><span class="bt"><span class="bf"></span></span><span class="bp2">3.0%</span></div>
+          <div class="bar-row" style="--w:7.2%"><span class="bn">nop</span><span class="bt"><span class="bf"></span></span><span class="bp2">2.5%</span></div>
+          <div class="bar-row" style="--w:6.7%"><span class="bn">pop</span><span class="bt"><span class="bf"></span></span><span class="bp2">2.3%</span></div>
+          <div class="bar-row" style="--w:6.6%"><span class="bn">push</span><span class="bt"><span class="bf"></span></span><span class="bp2">2.3%</span></div>
+          <div class="bar-row" style="--w:6.3%"><span class="bn">sub</span><span class="bt"><span class="bf"></span></span><span class="bp2">2.2%</span></div>
+          <div class="bar-row" style="--w:4.6%"><span class="bn">movzx</span><span class="bt"><span class="bf"></span></span><span class="bp2">1.6%</span></div>
+          <div class="bar-row jmp" style="--w:4.5%"><span class="bn">ret</span><span class="bt"><span class="bf"></span></span><span class="bp2">1.6%</span></div>
+          <div class="bar-row" style="--w:4.5%"><span class="bn">and</span><span class="bt"><span class="bf"></span></span><span class="bp2">1.6%</span></div>
+          <div class="legend"><span><i style="background:linear-gradient(90deg,#3fd0e8,#b48cff)"></i>بيانات وحسابات</span><span><i style="background:linear-gradient(90deg,#ffb454,#ff8d9d)"></i>تحكم في التدفق</span></div>
+        </div>
+        <p><b>الخلاصة:</b> 17 mnemonic بس = <b>92%</b> من الكود، وأول 40 = <b>98%</b> (من 244 mnemonic ظهروا). ثلث الكود كله <code>mov</code>! الكورس هيخليك تتقن الـ 40 دول لدرجة إنك متفكرش فيهم، وبعدين يعلّمك تفهم أي instruction نادرة من المرجع في دقيقة. حاجة لطيفة كمان: الـ disassembler لقى <b>197,131 byte</b> بقيمة <code>0xCC</code> (<code>int3</code>) — دي <b>padding</b> بيحطها MSVC بين الدوال، ومش كود حقيقي.</p>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 01</h3></div>
+
+          <quiz id="s01-q1" answer="1">
+            <q>الـ register <code>RIP</code> بيحتوي على إيه؟</q>
+            <o>آخر قيمة اتحسبت في الـ ALU</o>
+            <o>عنوان الـ instruction اللي هتتنفذ بعد كده</o>
+            <o>عدد الـ instructions اللي اتنفذت</o>
+            <o>عنوان قمة الـ stack</o>
+            <good>RIP = Instruction Pointer. التحكم في RIP = التحكم في البرنامج كله، وده هدف أي exploit.</good>
+            <bad>الحرف IP = Instruction Pointer. قمة الـ stack دي RSP.</bad>
+          </quiz>
+
+          <quiz id="s01-q2" answer="2">
+            <q><code>mov eax, 1</code> عند العنوان <code>0x401000</code> طولها 5 bytes. بعد ما تتنفذ، <code>RIP</code> = ؟</q>
+            <o><code>0x401001</code></o>
+            <o><code>0x401004</code></o>
+            <o><code>0x401005</code></o>
+            <o><code>0x401008</code></o>
+            <good>RIP بيزيد بطول الـ instruction بالظبط: 0x401000 + 5 = 0x401005.</good>
+            <bad>RIP بيعدّ <b>bytes</b> مش instructions. الطول 5.</bad>
+          </quiz>
+
+          <quiz id="s01-q3" answer="3">
+            <q>أقصى طول لـ instruction واحدة في x86-64؟</q>
+            <o>4 bytes (زي ARM)</o>
+            <o>8 bytes</o>
+            <o>10 bytes</o>
+            <o>15 bytes</o>
+            <good>من 1 لـ 15 byte. الطول المتغير ده (CISC) هو السبب إن الـ disassembler لازم يعرف هو بيبدأ منين بالظبط — وده اللي بيستغله الـ anti-disassembly.</good>
+            <bad>x86 طولها متغير، والحد الأقصى الرسمي رقم فردي.</bad>
+          </quiz>
+
+          <quiz id="s01-q4" answer="0">
+            <q>برنامج 32-bit شغّال على Windows 10 64-bit. الـ CPU شغّال في أنهي وضع؟</q>
+            <o>Long mode — compatibility sub-mode (عن طريق WoW64)</o>
+            <o>Real mode</o>
+            <o>Protected mode عادي من غير 64-bit</o>
+            <o>Ring 0</o>
+            <good>الـ OS نفسه في long mode، والـ process الـ 32-bit بيشتغل في compatibility mode عن طريق طبقة WoW64. وده سبب إنك محتاج x32dbg للبرامج دي (وهتشوف تكنيك "Heaven's Gate" اللي بيقفز بين الوضعين).</good>
+            <bad>Windows 64-bit مش بيرجع لـ real/protected mode. فيه sub-mode جوه الـ long mode.</bad>
+          </quiz>
+
+          <quiz id="s01-q5" answer="2">
+            <q>برنامج عادي (user-mode) عايز يكتب في ملف. إزاي بيوصل للـ kernel؟</q>
+            <o>بيكتب مباشرة في ذاكرة الـ kernel</o>
+            <o>بيستخدم <code>hlt</code></o>
+            <o>بـ <code>syscall</code> (مباشرة أو عن طريق API/libc بتعملها)</o>
+            <o>مينفعش أصلًا</o>
+            <good>الـ syscall هو الباب الرسمي من Ring 3 لـ Ring 0. على Windows عادة عن طريق <code>kernel32 → ntdll → syscall</code>.</good>
+            <bad>Ring 3 مسموحله يطلب بس، بـ instruction مخصوصة.</bad>
+          </quiz>
+
+          <quiz id="s01-q6" answer="1">
+            <q>أنهي أداة بتعمل bytes → Assembly بدقة (من غير "تخمين")؟</q>
+            <o>Decompiler</o>
+            <o>Disassembler</o>
+            <o>Compiler</o>
+            <o>Linker</o>
+            <good>الـ disassembler بيترجم الـ bytes لـ instructions (مع تحدي واحد: يعرف الكود بيبدأ فين). الـ decompiler هو اللي بيخمّن C.</good>
+            <bad>"dis-assemble" = عكس الـ assembler.</bad>
+          </quiz>
+
+          <quiz id="s01-q7" answer="0">
+            <q>حسب إحصائيات DLLs الـ Windows، أكتر instruction استخدامًا بفرق كبير؟</q>
+            <o><code>mov</code> (~35%)</o>
+            <o><code>call</code></o>
+            <o><code>jmp</code></o>
+            <o><code>xor</code></o>
+            <good>ثلث الكود تقريبًا نقل بيانات. البرامج بتنقل أكتر ما بتحسب.</good>
+            <bad>فكّر: أغلب الكود بينقل قيم بين registers وذاكرة.</bad>
+          </quiz>
+
+          <quiz id="s01-q8" answer="3">
+            <q>ليه الـ malware يقدر يكتب bytes في الذاكرة وبعدين ينفّذها (زي الـ shellcode والـ unpackers)؟</q>
+            <o>عشان الـ CPU بيقرا الكود من الهارد ديسك مباشرة</o>
+            <o>عشان الكود متخزن في الـ registers</o>
+            <o>ده مستحيل على x86</o>
+            <o>عشان الكود والبيانات الاتنين bytes في نفس الذاكرة (von Neumann) — والـ CPU بينفّذ أي bytes RIP بيشاور عليها لو الصفحة executable</o>
+            <good>بالظبط. الحماية الوحيدة هي صلاحيات الصفحات (NX/DEP) — والـ malware بيطلب صفحة RWX أو بيغيّر الصلاحيات بـ <code>VirtualProtect</code>/<code>mprotect</code>. ده من أهم الـ indicators اللي بتدور عليها.</good>
+            <bad>افتكر الـ diagram: الكود والبيانات فين؟</bad>
+          </quiz>
+
+          <lab-challenge id="s01-lc1" title="أول كود ليك: خلّي rax = 7 وrbx = 7" level="1" maxins="4">
+            <desc>بالـ instructions اللي شفتها في المعمل (<code>mov</code> و<code>add</code> و<code>push</code> و<code>pop</code>)، خلّي <code>rax = 7</code> و<code>rbx = 7</code> في الآخر. الحد الأقصى 4 instructions — والـ <code>ret</code> بتتحسب منهم! (تلميح: <code>push rax</code> + <code>pop rbx</code> بينسخوا قيمة rax لـ rbx.)</desc>
+            <starter>
+start:
+    mov eax, 0
+    ret
+</starter>
+            <solution>
+start:
+    mov eax, 7
+    mov ebx, eax
+    ret
+</solution>
+            <test setup="" expect="rax=7;rbx=7"/>
+            <test setup="rax=99;rbx=123" expect="rax=7;rbx=7" label="registers فيها قيم قديمة"/>
+          </lab-challenge>
+        </div>
+      </section>

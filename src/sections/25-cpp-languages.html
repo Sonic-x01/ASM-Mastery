@@ -1,0 +1,184 @@
+      <section class="section" id="s25" data-part="الجزء 4 · الهندسة العكسية" data-nav="C++ ولغات تانية" data-icon="🧱" data-keywords="c++ this thiscall vtable vftable vptr virtual rtti classinformer name mangling demangle msvc itanium operator new std::string sso std::vector exceptions cxxthrowexception go golang pclntab goresym rust .net dnspy delphi pyinstaller autoit nim">
+        <div class="section-head">
+          <span class="section-index">25</span>
+          <div>
+            <p class="eyebrow">المرحلة الخامسة والعشرين · مش كل حاجة C</p>
+            <h2>C++ في الـ binary، ولمحة عن Go وRust و.NET</h2>
+            <p class="lede">كتير من الـ malware الحديث مكتوب بـ C++ (RATs، ransomware) أو Go/Rust (cross-platform، صعب التحليل). كل لغة ليها «بصمة» في الـ assembly: إزاي بتنادي الـ methods، إزاي بتخزن الـ strings، وفين بتسيب أسماء ممكن ترجّعها. لو عرفت البصمة، الـ binary الغريب بيبقى مألوف.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">Classes وvirtual calls <span class="tag">ASM Explorer</span></h3>
+        <div class="explorer" data-scene="vcall"></div>
+        <compiled file="vcall.cpp" targets="msvc++-O2,g++-O2" note="<b>dispatch</b>: <code>mov rax, [rcx]</code> + <code>jmp [rax+8]</code> (MSVC) / <code>mov rax, [rdi]</code> + <code>jmp [rax+16]</code> (g++) = virtual call (tail call). <b>make</b>: <code>operator new(24)</code> ← حجم الـ object، وبعدين كتابة الـ vptr في <code>[rax]</code> = constructor متعمله inline. لو شفت <code>mov [rax], offset vftable</code> بعد <code>new</code> ← ده class وده حجمه. <b>الـ vtables</b> نفسها: MSVC: الخانة −1 = RTTI locator وبعدها <code>vector deleting destructor</code> ثم run. g++: offset-to-top (0) + typeinfo ثم destructorين ثم run، والـ typeinfo name <code>5Exfil</code> (طول + اسم). ولاحظ <code>Exfil::run</code>: MSVC <code>add DWORD PTR [rcx+16]</code> (long = 4) وg++ <code>add QWORD PTR [rdi+16]</code>.">
+struct Command {
+    virtual ~Command() {}
+    virtual int run(int arg) = 0;
+    int id;
+};
+
+struct Sleep : Command {
+    int run(int arg) override { return arg * 1000; }
+};
+
+struct Exfil : Command {
+    long bytes = 0;
+    int run(int arg) override { bytes += arg; return 1; }
+};
+
+int dispatch(Command *c, int arg) {
+    return c->run(arg);                 // virtual call
+}
+
+Command *make(int kind) {
+    if (kind == 1) return new Sleep();
+    return new Exfil();
+}
+</compiled>
+
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Mangled</th><th>Demangled</th><th>ملاحظة</th></tr></thead>
+            <tbody>
+              <tr><td><code>?run@Exfil@@UEAAHH@Z</code></td><td><code>public: virtual int Exfil::run(int)</code></td><td>MSVC: <code>?name@class@@</code> ثم الـ signature مشفرة (U = public virtual، H = int)</td></tr>
+              <tr><td><code>_ZN5Exfil3runEi</code></td><td><code>Exfil::run(int)</code></td><td>Itanium (gcc/clang): أطوال + أسماء + types (i = int)</td></tr>
+              <tr><td><code>??2@YAPEAX_K@Z</code> · <code>_Znwm</code></td><td><code>operator new(size_t)</code></td><td>الـ arg = حجم الـ object!</td></tr>
+              <tr><td><code>??_7Exfil@@6B@</code> · <code>_ZTV5Exfil</code></td><td><code>Exfil::`vftable'</code> · vtable for Exfil</td><td>الـ vtable نفسها</td></tr>
+              <tr><td><code>.?AVBeacon@@</code> · <code>.?AUExfil@@</code></td><td>RTTI type descriptor</td><td>V = class، U = struct — أسماء الـ classes حتى في binary متشال منه الـ symbols</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>(أدوات: <code>undname</code> (MSVC)، <code>c++filt</code>، وIDA/Ghidra بيعملوا demangle تلقائي.)</p>
+
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🧵</div><h4>std::string</h4><p><b>MSVC</b> (32 bytes): <code>+0</code> buffer 16 byte <i>أو</i> pointer لو أطول من 15 حرف (SSO)، <code>+16</code> size، <code>+24</code> capacity — لو capacity ≥ 16 ← الـ data في الـ heap. <b>libstdc++</b>: <code>+0</code> pointer، <code>+8</code> size، <code>+16</code> buffer محلي. هتشوف <code>cmp qword [rcx+18h], 0Fh</code> قبل كل قراية = «فين الـ data؟».</p></div>
+          <div class="card reveal"><div class="ico">📚</div><h4>std::vector وexceptions</h4><p>vector = 3 pointers: <code>begin</code>، <code>end</code>، <code>end_of_storage</code>؛ الحجم = <code>(end − begin) / sizeof(T)</code> ← هتشوف <code>sub</code> + <code>sar</code>. الـ exceptions: <code>_CxxThrowException</code> (MSVC) / <code>__cxa_throw</code> (gcc)، والـ catch blocks بتبان «مفصولة» عن الـ graph.</p></div>
+        </div>
+
+        <h3 class="sub">لغات تانية: اعرفها من أول نظرة</h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>اللغة</th><th>البصمة</th><th>الأداة / الطريقة</th></tr></thead>
+            <tbody>
+              <tr><td><b>Go</b></td><td>binary ضخم (static)، strings مش منتهية بـ NUL (pointer + length) ومتلزقة في blob واحد، <code>runtime.morestack</code> في أول كل دالة، calling convention خاص (registers من 1.17: <code>rax, rbx, rcx, rdi, rsi, r8–r11</code>)</td><td><b>GoReSym</b> / IDA 8+: بيرجّعوا أسماء الدوال من الـ <code>pclntab</code> حتى لو stripped</td></tr>
+              <tr><td><b>Rust</b></td><td>strings panic فيها مسارات (<code>src/main.rs</code>، <code>/rustc/…</code>)، أسماء <code>_ZN…17h&lt;hash&gt;E</code> أو <code>_R…</code>، كود كتير لـ bounds checks وعرض الأخطاء</td><td>demangle، وركّز على الـ crates المستخدمة (strings)</td></tr>
+              <tr><td><b>.NET</b> (C#)</td><td>PE فيه CLR header (data directory 14)، import وحيد <code>mscoree.dll!_CorExeMain</code></td><td><b>مش assembly!</b> dnSpy / ILSpy بيرجّعوا C# تقريبًا كامل</td></tr>
+              <tr><td>Delphi</td><td>strings بطولها قبلها، أسماء units (<code>System.SysUtils</code>)، register convention (<code>eax, edx, ecx</code>)</td><td>IDR (Interactive Delphi Reconstructor)</td></tr>
+              <tr><td>PyInstaller / AutoIt / Nim</td><td>PyInstaller: <code>_MEIPASS</code>، <code>PYZ-00.pyz</code> · AutoIt: script مضغوط في resource · Nim: <code>NimMain</code>، <code>sysFatal</code></td><td>pyinstxtractor + decompiler · AutoIt-Ripper · تحليل عادي</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 25</h3></div>
+
+          <quiz id="s25-q1" answer="2">
+            <q>دالة MSVC x64 بتبدأ بـ <code>mov rax, [rcx]</code> ثم <code>call qword ptr [rax+18h]</code>. ده:</q>
+            <o>نداء API من الـ IAT</o>
+            <o>jump table</o>
+            <o>virtual call للـ method رقم 3 (index 0x18/8) على الـ object اللي في rcx</o>
+            <o>function pointer عادي</o>
+            <good>[rcx] = vptr، [vptr+0x18] = الخانة الرابعة (index 3).</good>
+            <bad>[rcx] = أول qword في الـ object…</bad>
+          </quiz>
+          <quiz id="s25-q2" answer="0">
+            <q><code>mov ecx, 58h</code> / <code>call ??2@YAPEAX_K@Z</code> / <code>lea rdx, ??_7CBeacon@@6B@</code> / <code>mov [rax], rdx</code>. نستنتج:</q>
+            <o>بيعمل object من class <code>CBeacon</code> حجمه 0x58 byte، والسطر الأخير = كتابة الـ vptr (constructor)</o>
+            <o>بيحجز string</o>
+            <o>بينادي CBeacon::new</o>
+            <o>exception</o>
+            <good>operator new(0x58) ← الحجم، و??_7 = vftable. اعمل struct في IDA حجمه 0x58 وأول field = vptr.</good>
+            <bad>??2 = operator new، ??_7 = vftable.</bad>
+          </quiz>
+          <quiz id="s25-q3" answer="3">
+            <q>sample كل الـ imports بتاعته: <code>mscoree.dll!_CorExeMain</code>. هتفتحه بـ:</q>
+            <o>IDA مباشرة</o>
+            <o>x64dbg</o>
+            <o>Ghidra</o>
+            <o>dnSpy / ILSpy — ده .NET والكود IL مش x86</o>
+            <good>الـ .NET بيتعمله decompile لـ C# تقريبًا كامل. ولو obfuscated (ConfuserEx) فيه de4dot.</good>
+            <bad>mscoree = .NET runtime.</bad>
+          </quiz>
+          <quiz id="s25-q4" answer="1">
+            <q>binary 8MB، stripped، فيه strings زي <code>runtime.gopanic</code> و<code>GOMAXPROCS</code>. أول خطوة؟</q>
+            <o>تقرا الـ main من الـ entry</o>
+            <o>Go — شغّل GoReSym (أو IDA الحديث) يرجّع أسماء الدوال من الـ pclntab وابدأ من <code>main.main</code></o>
+            <o>تحذف الـ runtime يدويًا</o>
+            <o>تحوّله لـ C</o>
+            <good>Go بيحتفظ بجدول الأسماء والسطور للـ stack traces — هدية للـ analyst. الكود بتاع الـ author في <code>main.*</code>.</good>
+            <bad>Go runtime…</bad>
+          </quiz>
+
+          <lab-challenge id="s25-lc1" title="Virtual call بإيدك" level="2" entry="vcall">
+            <desc>عندك classين (<code>Dog</code> و<code>Cat</code>) كل واحد بـ vtable فيها 3 methods، والـ objects في <code>.data</code>. اكتب <code>vcall</code>: <code>rdi</code> = object، <code>esi</code> = arg. نادي الـ method رقم <b>2</b> (<code>speak</code>) من الـ vtable بتاعة الـ object بـ <code>this = rdi</code> و<code>arg = esi</code>، ورجّع نتيجتها. (نفس الكود لازم يشتغل للنوعين = polymorphism.)</desc>
+            <starter>
+section .data
+vt_dog:  dq dog_dtor, dog_name, dog_speak
+vt_cat:  dq cat_dtor, cat_name, cat_speak
+obj_dog: dq vt_dog, 3           ; vptr, legs_bonus
+obj_cat: dq vt_cat, 9           ; vptr, lives
+
+section .text
+dog_dtor:
+cat_dtor:
+dog_name:
+cat_name:
+    xor eax, eax
+    ret
+dog_speak:                      ; return arg*2 + this->field
+    lea eax, [rsi+rsi]
+    add eax, [rdi+8]
+    ret
+cat_speak:                      ; return arg * this->field
+    mov eax, esi
+    imul eax, [rdi+8]
+    ret
+
+vcall:                          ; rdi = object, esi = arg
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+section .data
+vt_dog:  dq dog_dtor, dog_name, dog_speak
+vt_cat:  dq cat_dtor, cat_name, cat_speak
+obj_dog: dq vt_dog, 3           ; vptr, legs_bonus
+obj_cat: dq vt_cat, 9           ; vptr, lives
+
+section .text
+dog_dtor:
+cat_dtor:
+dog_name:
+cat_name:
+    xor eax, eax
+    ret
+dog_speak:                      ; return arg*2 + this->field
+    lea eax, [rsi+rsi]
+    add eax, [rdi+8]
+    ret
+cat_speak:                      ; return arg * this->field
+    mov eax, esi
+    imul eax, [rdi+8]
+    ret
+
+vcall:                          ; rdi = object, esi = arg
+    mov rax, [rdi]              ; vptr
+    jmp [rax+16]                ; vtable[2] - this/arg already in rdi/esi (tail call)
+</solution>
+            <test setup="rdi=obj_dog;rsi=5" expect="eax=13" label="Dog: 5*2 + 3"/>
+            <test setup="rdi=obj_cat;rsi=5" expect="eax=45" label="Cat: 5 * 9"/>
+            <test setup="rdi=obj_cat;rsi=0" expect="eax=0"/>
+          </lab-challenge>
+
+          <re-task id="s25-re1" title="فك اسم MSVC" level="1" answer="Exfil" norm="str">
+            <desc>في الـ RTTI لقيت string: <code>.?AVExfil@@</code>. اسم الـ class؟</desc>
+            <hint>.?AV + اسم + @@.</hint>
+            <explain><b>Exfil</b> (V = class). نفس الشكل للـ namespaces: <code>.?AVBeacon@net@@</code> = <code>net::Beacon</code> (الترتيب بالعكس).</explain>
+          </re-task>
+          <re-task id="s25-re2" title="رقم الـ method" level="1" answer="4" norm="int">
+            <desc>g++ (Itanium ABI): <code>mov rax, [rdi]</code> / <code>call [rax+20h]</code>. الـ method دي ترتيبها كام في الـ vtable لو بنعدّ من 0؟ (الـ vptr بيشاور على أول دالة، بعد offset-to-top والـ typeinfo.)</desc>
+            <hint>0x20 / 8.</hint>
+            <explain>0x20 / 8 = <b>4</b>. ولو الـ class فيه virtual destructor، gcc بيحط اتنين في الأول (complete + deleting) ← الـ method دي تالت دالة virtual عادية في الـ class.</explain>
+          </re-task>
+        </div>
+      </section>

@@ -1,0 +1,337 @@
+      <section class="section" id="s15" data-part="الجزء 3 · البرمجة الحقيقية" data-nav="Assembly مع C وWindows" data-icon="🪟" data-keywords="extern global link gcc inline assembly extended asm constraints clobbers msvc intrinsics __cpuid __rdtsc nasm macro %define %macro %rep struc windows x64 winapi getstdhandle writefile exitprocess messageboxa shadow space import iat">
+        <div class="section-head">
+          <span class="section-index">15</span>
+          <div>
+            <p class="eyebrow">المرحلة الخامسة عشر · خليها تشتغل مع العالم</p>
+            <h2>Assembly مع C، الـ Macros، وبرامج Windows حقيقية</h2>
+            <p class="lede">في الحقيقة نادرًا ما برنامج بيبقى Assembly 100%: الـ malware بيخلط C مع inline assembly (anti-debug، syscalls مباشرة)، والـ shellcode بيتكتب Assembly وبيتنادي من loader بـ C. المرحلة دي بتوصّل كل ده: إزاي تنادي C من Assembly والعكس، الـ inline asm، الـ NASM macros، وبرامج Windows x64 بتكلّم الـ WinAPI مباشرة.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">C ↔ Assembly <span class="tag">global · extern · link</span></h3>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">📤</div><h4>Assembly بيصدّر دالة لـ C</h4><p>في الـ <code>.asm</code>: <code>global my_func</code>، والدالة تحترم الـ calling convention. في C: <code>long my_func(long a, long b);</code> وتناديها عادي. وبعدين: <code>nasm -f elf64 f.asm</code> + <code>gcc main.c f.o</code>.</p></div>
+          <div class="card reveal"><div class="ico">📥</div><h4>Assembly بينادي C (أو libc)</h4><p><code>extern printf</code>، وبعدين <code>call printf</code> بعد ما تحط الـ args وتظبط الـ alignment (rsp مضاعف 16) و<code>al</code> = عدد الـ xmm args. الـ entry تبقى <code>main</code> مش <code>_start</code> وgcc يعمل الـ link.</p></div>
+        </div>
+        <nasm-example file="printf_from_asm.asm" assemble="elf64">
+; build:  nasm -f elf64 printf_from_asm.asm && gcc -no-pie printf_from_asm.o -o p && ./p
+default rel
+extern printf
+section .data
+fmt: db "%s has %d bytes, key=0x%lx", 10, 0
+name: db "payload.bin", 0
+
+section .text
+global main
+main:
+    push rbp                    ; entry rsp is 8 mod 16 -> push makes it 16-aligned
+    lea rdi, [fmt]              ; arg1: format
+    lea rsi, [name]             ; arg2: %s
+    mov edx, 4096               ; arg3: %d
+    mov rcx, 0xDEADBEEF         ; arg4: %lx
+    xor eax, eax                ; al = 0 vector registers (varargs rule)
+    call printf
+    xor eax, eax                ; return 0 from main
+    pop rbp
+    ret
+</nasm-example>
+        <p>المثال ده بيتعمله assemble وبيتأكد إنه سليم، بس مش بيتشغل هنا (Compiler Explorer بيربط NASM من غير libc). جرّبه في WSL بالأوامر اللي في أوله. والعكس — دالة Assembly بتتنادى من C — ده شغّال جوه الصفحة (بصيغة GAS Intel اللي gcc بيفهمها):</p>
+        <c-example file="asm_from_c.c">
+#include <stdio.h>
+
+/* A whole function written in assembly, called from C (System V ABI). */
+__asm__(
+    ".intel_syntax noprefix\n"
+    ".text\n"
+    ".globl xor_crypt\n"
+    "xor_crypt:\n"                   /* void xor_crypt(char *buf, long n, char key) */
+    "    test rsi, rsi\n"
+    "    jz 2f\n"
+    "1:  xor byte ptr [rdi], dl\n"   /* local numeric labels: 1f / 1b */
+    "    inc rdi\n"
+    "    dec rsi\n"
+    "    jnz 1b\n"
+    "2:  ret\n"
+    ".att_syntax prefix\n"
+);
+void xor_crypt(char *buf, long n, char key);
+
+int main(void) {
+    char secret[] = "beacon.example.net";
+    xor_crypt(secret, sizeof secret - 1, 0x42);
+    printf("encrypted: ");
+    for (unsigned i = 0; i < sizeof secret - 1; i++) printf("%02x", (unsigned char)secret[i]);
+    xor_crypt(secret, sizeof secret - 1, 0x42);
+    printf("\ndecrypted: %s\n", secret);
+    return 0;
+}
+        </c-example>
+
+        <h3 class="sub">Inline Assembly <span class="tag">GCC extended asm</span></h3>
+        <p>لما تحتاج instruction واحدة جوه كود C (<code>cpuid</code>، <code>rdtsc</code>، <code>syscall</code>)، gcc عنده <b>extended asm</b>: بتقوله الـ inputs والـ outputs والـ registers اللي بتبوّظها، وهو بيظبط الباقي. ده كود anti-VM حقيقي الشكل: بيقرا الـ vendor والـ hypervisor bit:</p>
+        <c-example file="inline_cpuid.c">
+#include <stdio.h>
+#include <string.h>
+
+int main(void) {
+    unsigned int a, b, c, d;
+    char vendor[13];
+
+    __asm__ volatile ("cpuid"
+                      : "=a"(a), "=b"(b), "=c"(c), "=d"(d)   /* outputs */
+                      : "a"(0));                              /* input: leaf 0 */
+    memcpy(vendor + 0, &b, 4);       /* the vendor string is EBX, EDX, ECX */
+    memcpy(vendor + 4, &d, 4);
+    memcpy(vendor + 8, &c, 4);
+    vendor[12] = 0;
+    printf("vendor: %s\n", vendor);
+
+    __asm__ volatile ("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
+    printf("hypervisor bit (ecx[31]) = %u\n", c >> 31);
+    return 0;
+}
+        </c-example>
+        <p>(المخرجات بتعتمد على الـ server اللي Compiler Explorer شغال عليه — وغالبًا هتلاقي الـ hypervisor bit = 1، لأنه VM في الـ cloud! بالظبط اللي الـ malware بيدور عليه.)</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Constraint</th><th>المعنى</th></tr></thead>
+            <tbody>
+              <tr><td><code>"=a"(x)</code></td><td>output: بعد الـ asm، <code>x = eax</code></td></tr>
+              <tr><td><code>"a"(0)</code></td><td>input: حط 0 في eax قبل الـ asm</td></tr>
+              <tr><td><code>"r"(x)</code> / <code>"=r"(y)</code></td><td>أي register يختاره الـ compiler</td></tr>
+              <tr><td><code>"m"(var)</code></td><td>operand في الذاكرة</td></tr>
+              <tr><td><code>: "rcx", "r11", "memory"</code></td><td>clobbers: registers / ذاكرة الـ asm بيبوّظها (زي syscall)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>MSVC x64 مفيهوش inline asm!</strong><p>MSVC بيسمح بـ <code>__asm { }</code> في الـ 32-bit بس. في الـ x64 الـ malware authors بيستخدموا <b>intrinsics</b> (<code>__cpuid</code>، <code>__rdtsc</code>، <code>__readgsqword(0x60)</code> = PEB!، <code>_ReturnAddress</code>) أو ملفات <code>.asm</code> منفصلة (MASM) — زي الـ direct syscall stubs (SysWhispers، Hell's Gate). لو لقيت دالة صغيرة كلها <code>mov r10, rcx</code> + <code>mov eax, N</code> + <code>syscall</code> جوه EXE عادي ← direct syscalls.</p></div></div>
+
+        <h3 class="sub">الـ NASM Macros <span class="tag">preprocessor</span></h3>
+        <p>NASM عنده preprocessor قوي. الـ shellcode والـ malware المكتوب بـ Assembly بيستخدمه بكثرة (مثلًا macro بيحسب hash الـ API وقت الـ assembly). المهم كـ reverser: الـ macros <b>بتختفي</b> في الـ binary — اللي بتشوفه هو الـ instructions اللي اتولّدت.</p>
+        <nasm-example file="macros.asm" io>
+%define STDOUT 1                    ; text substitution
+%define SYS_WRITE 1
+
+%macro print_literal 1              ; a macro with 1 parameter
+    jmp %%skip                      ; %% = label unique to each expansion
+%%text: db %1, 10
+%%len  equ $ - %%text
+%%skip:
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel %%text]
+    mov edx, %%len
+    syscall
+%endmacro
+
+struc conn                          ; NASM struct definition = offsets
+    .port:    resw 1
+    .flags:   resw 1
+    .addr:    resd 1
+endstruc                            ; conn_size = 8
+
+section .text
+global _start
+_start:
+    print_literal "macro expanded #1"
+    print_literal "macro expanded #2"
+%assign i 1
+%rep 3                              ; repeated at assemble time
+    mov edi, i
+    call print_int
+    call print_nl
+%assign i i*10
+%endrep
+    mov edi, conn.addr              ; = 4  (struc offsets are constants)
+    call print_int
+    call print_nl
+    mov edi, conn_size              ; = 8
+    call print_int
+    call print_nl
+    xor edi, edi
+    call exit
+</nasm-example>
+        <div class="callout tip"><span class="ci">💡</span><div><strong>ملاحظة على المثال</strong><p>الـ macro بيحط الـ string <b>جوه الـ .text</b> ويقفز فوقها (<code>jmp %%skip</code>) — بالظبط الحيلة اللي الـ shellcode بيستخدمها عشان يبقى قطعة واحدة. المعمل بتاعنا مش بيدعم الـ macros ولا البيانات جوه الكود، فالمثال ده بيتشغل على Compiler Explorer بس. اضغط ⚙ Bytes وشوف الـ string مدفونة وسط الـ instructions.</p></div></div>
+
+        <h3 class="sub">برنامج Windows x64 بـ NASM <span class="tag">WinAPI</span></h3>
+        <p>على Windows مفيش syscalls موثّقة للبرامج — بتنادي <b>الـ API</b> (DLLs) وتحترم الـ Microsoft x64 convention: <code>rcx, rdx, r8, r9</code>، <b>32 byte shadow space</b>، وrsp مضاعف 16 قبل كل call. ده برنامج console كامل (اتعمله assemble هنا بـ <code>-f win64</code>، ونسخة مطابقة منه اتشغّلت فعلًا على Windows 10 وطبعت السطر):</p>
+        <nasm-example file="win_hello.asm" assemble="win64">
+; nasm -f win64 win_hello.asm -o win_hello.obj
+; gcc -nostartfiles -Wl,-e,start win_hello.obj -o win_hello.exe -lkernel32     (MinGW)
+; link /subsystem:console /entry:start win_hello.obj kernel32.lib               (MSVC)
+default rel
+extern GetStdHandle
+extern WriteFile
+extern ExitProcess
+
+section .data
+msg:     db "Hello from Windows x64!", 13, 10
+msg_len  equ $ - msg
+
+section .bss
+written: resd 1
+
+section .text
+global start
+start:
+    sub rsp, 40                 ; 32 shadow space + 8 to realign (entry rsp = 8 mod 16)
+    mov ecx, -11                ; STD_OUTPUT_HANDLE
+    call GetStdHandle           ; rax = console handle
+    mov rcx, rax                ; 1: hFile
+    lea rdx, [msg]              ; 2: lpBuffer
+    mov r8d, msg_len            ; 3: nNumberOfBytesToWrite
+    lea r9, [written]           ; 4: lpNumberOfBytesWritten
+    mov qword [rsp+32], 0       ; 5: lpOverlapped = NULL  (above the shadow space)
+    call WriteFile
+    xor ecx, ecx                ; exit code 0
+    call ExitProcess
+</nasm-example>
+        <nasm-example file="win_msgbox.asm" assemble="win64">
+; a GUI message box: link with -luser32 / user32.lib as well
+default rel
+extern MessageBoxA
+extern ExitProcess
+
+section .data
+title: db "ASM Mastery", 0
+text:  db "Hello from NASM!", 0
+
+section .text
+global start
+start:
+    sub rsp, 40
+    xor ecx, ecx                ; hWnd = NULL
+    lea rdx, [text]             ; lpText
+    lea r8, [title]             ; lpCaption
+    mov r9d, 0x40               ; uType = MB_ICONINFORMATION
+    call MessageBoxA
+    xor ecx, ecx
+    call ExitProcess
+</nasm-example>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>نفس البرنامج في IDA / x64dbg</strong><p>الـ <code>call MessageBoxA</code> هتظهر <code>call cs:__imp_MessageBoxA</code> (IDA) أو <code>call qword ptr ds:[&lt;&amp;MessageBoxA&gt;]</code> (x64dbg): نداء غير مباشر عن طريق جدول الـ imports (الـ <b>IAT</b>). الـ <b>Imports</b> tab لوحده بيقولك كتير عن أي sample: <code>VirtualAlloc</code> + <code>WriteProcessMemory</code> + <code>CreateRemoteThread</code> = injection. هنفصّل الـ IAT في مرحلة PE.</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 15</h3></div>
+
+          <quiz id="s15-q1" answer="1">
+            <q>في الـ <code>.asm</code> عايز C يقدر ينادي <code>decrypt</code>. محتاج:</q>
+            <o><code>extern decrypt</code></o>
+            <o><code>global decrypt</code></o>
+            <o><code>section .decrypt</code></o>
+            <o><code>%define decrypt</code></o>
+            <good>global = صدّر الاسم. extern = استورد اسم معرّف في مكان تاني.</good>
+            <bad>واحد للتصدير وواحد للاستيراد.</bad>
+          </quiz>
+          <quiz id="s15-q2" answer="3">
+            <q>في برنامج Windows x64 بـ NASM نسيت <code>sub rsp, 40</code> قبل <code>call WriteFile</code>. إيه اللي ممكن يحصل؟</q>
+            <o>ولا حاجة</o>
+            <o>خطأ في الـ assembly</o>
+            <o>البرنامج هيبقى أبطأ</o>
+            <o>الـ API هتكتب الـ shadow space فوق عنوان الرجوع / بياناتك، والـ stack مش aligned — crash أو سلوك عشوائي</o>
+            <good>الـ callee مسموحله يكتب في الـ 32 byte اللي فوق عنوان رجوعه، وبعض الدوال بتستخدم SSE instructions بتعمل crash لو الـ stack مش aligned.</good>
+            <bad>الـ shadow space ملك الـ callee.</bad>
+          </quiz>
+          <quiz id="s15-q3" answer="0">
+            <q>في GCC inline asm، الـ clobber <code>"memory"</code> معناه:</q>
+            <o>الـ asm ممكن يقرا/يكتب ذاكرة — متخليش الـ compiler يحتفظ بقيم ذاكرة في registers عبره</o>
+            <o>بيحجز ذاكرة</o>
+            <o>بيمسح الذاكرة</o>
+            <o>الـ asm مبيلمسش الذاكرة</o>
+            <good>من غيره الـ optimizer ممكن يفترض إن الذاكرة متغيرتش ويستخدم قيمة قديمة.</good>
+            <bad>الـ clobbers = حاجات الـ asm بيبوّظها.</bad>
+          </quiz>
+          <quiz id="s15-q4" answer="2">
+            <q>EXE مكتوب بـ C على Windows x64 (MSVC) فيه دالة: <code>mov r10, rcx</code> / <code>mov eax, 18h</code> / <code>syscall</code> / <code>ret</code>. ده:</q>
+            <o>inline asm عادي</o>
+            <o>كود ntdll طبيعي</o>
+            <o>direct syscall stub — الـ malware بينادي الـ kernel من غير ما يعدّي على ntdll (وبيتخطى hooks الـ EDR)</o>
+            <o>anti-VM</o>
+            <good>الشكل ده مكانه الطبيعي ntdll.dll. وجوده في الـ EXE نفسه = تقنية evasion (SysWhispers/Hell's Gate). 0x18 = رقم الـ syscall (SSN).</good>
+            <bad>MSVC x64 مفيهوش inline asm، والشكل ده نسخة من stubs بتاعة dll معيّنة…</bad>
+          </quiz>
+          <quiz id="s15-q5" answer="1">
+            <q>NASM: <code>%rep 4</code> / <code>nop</code> / <code>%endrep</code>. في الـ binary هتلاقي:</q>
+            <o>loop بتتكرر 4 مرات</o>
+            <o>4 instructions <code>nop</code> ورا بعض (0x90 × 4) — الـ macro بيتفك وقت الـ assembly</o>
+            <o>instruction rep</o>
+            <o>ولا حاجة</o>
+            <good>الـ preprocessor بيكرر النص قبل الـ assembly. مفيش loop وقت التشغيل.</good>
+            <bad>%rep شغالة إمتى: assemble time ولا run time؟</bad>
+          </quiz>
+          <quiz id="s15-q6" answer="3">
+            <q><code>__readgsqword(0x60)</code> في كود C (MSVC x64) بيرجع:</q>
+            <o>الـ TEB</o>
+            <o>الـ stack canary</o>
+            <o>الـ ImageBase</o>
+            <o>عنوان الـ PEB</o>
+            <good>intrinsic بيتحول لـ <code>mov rax, gs:[60h]</code>. أشهر سطر في كود الـ anti-debug والـ API resolving.</good>
+            <bad>gs:[60h] على Windows x64…</bad>
+          </quiz>
+
+          <challenge id="s15-c1" title="دالة Assembly بتتنادى من C" level="2" lang="c">
+            <desc>كمّل الدالة <code>count_upper</code> بالـ Assembly (GAS Intel syntax جوه <code>__asm__</code>): بتاخد string في <code>rdi</code> وبترجع عدد الحروف الكبيرة (A–Z) في <code>rax</code>. الـ main بتطبع النتيجة لـ 3 strings:<br><code>3</code><br><code>0</code><br><code>6</code></desc>
+            <starter>
+#include <stdio.h>
+
+__asm__(
+    ".intel_syntax noprefix\n"
+    ".text\n"
+    ".globl count_upper\n"
+    "count_upper:\n"
+    "    xor eax, eax\n"          /* TODO: loop over the string */
+    "    ret\n"
+    ".att_syntax prefix\n"
+);
+long count_upper(const char *s);
+
+int main(void) {
+    printf("%ld\n", count_upper("Hello World X"));
+    printf("%ld\n", count_upper("no caps here"));
+    printf("%ld\n", count_upper("ABC-def-GHI"));
+    return 0;
+}
+</starter>
+            <expected>
+3
+0
+6
+</expected>
+            <solution>
+#include <stdio.h>
+
+__asm__(
+    ".intel_syntax noprefix\n"
+    ".text\n"
+    ".globl count_upper\n"
+    "count_upper:\n"
+    "    xor eax, eax\n"
+    "1:  movzx edx, byte ptr [rdi]\n"
+    "    test edx, edx\n"
+    "    jz 3f\n"
+    "    sub edx, 'A'\n"          /* 0..25 for 'A'..'Z' */
+    "    cmp edx, 25\n"
+    "    ja 2f\n"
+    "    inc rax\n"
+    "2:  inc rdi\n"
+    "    jmp 1b\n"
+    "3:  ret\n"
+    ".att_syntax prefix\n"
+);
+long count_upper(const char *s);
+
+int main(void) {
+    printf("%ld\n", count_upper("Hello World X"));
+    printf("%ld\n", count_upper("no caps here"));
+    printf("%ld\n", count_upper("ABC-def-GHI"));
+    return 0;
+}
+</solution>
+          </challenge>
+
+          <re-task id="s15-re1" title="-11 ده إيه؟" level="1" answer="STD_OUTPUT_HANDLE" norm="text">
+            <desc>في sample لقيت <code>mov ecx, 0FFFFFFF5h</code> ثم <code>call cs:GetStdHandle</code>. اسم الثابت اللي اتبعت؟ (STD_INPUT_HANDLE = −10، STD_OUTPUT_HANDLE = −11، STD_ERROR_HANDLE = −12)</desc>
+            <hint>0xFFFFFFF5 كـ signed 32-bit كام؟</hint>
+            <explain><code>0xFFFFFFF5 = −11</code> = <code>STD_OUTPUT_HANDLE</code>. أي ثابت سالب صغير في الـ API هيظهر بالشكل ده. الـ malware اللي بيكتب على الـ console غالبًا debug build أو أداة command-line (أو reverse shell بيوصّل الـ handles).</explain>
+          </re-task>
+        </div>
+      </section>

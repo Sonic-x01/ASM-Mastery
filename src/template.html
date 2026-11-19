@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="كورس Assembly x86-64 تفاعلي من الصفر للاحتراف، مصمم للـ Reverse Engineering وتحليل الـ Malware: معمل debugger جوه الصفحة، أكواد NASM بتتشغّل، مخرجات compilers حقيقية، crackmes ومشاريع.">
+<meta name="theme-color" content="#060911">
+<title>ASM Mastery for Reverse Engineers — Assembly من الصفر للاحتراف</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800;900&family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800;900&family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet"><style>.reveal{opacity:1!important;transform:none!important}</style></noscript>
+<link rel="stylesheet" href="assets/styles.css?v={{VER}}">
+<link rel="stylesheet" href="assets/effects.css?v={{VER}}">
+<link rel="stylesheet" href="assets/asm.css?v={{VER}}">
+<link rel="stylesheet" href="assets/explorer.css?v={{VER}}">
+<link rel="stylesheet" href="assets/theme.css?v={{VER}}">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23060911'/><text x='50' y='64' font-size='40' font-family='monospace' font-weight='700' text-anchor='middle' fill='%233fd0e8'>0x</text><rect x='18' y='74' width='64' height='6' rx='3' fill='%23b48cff'/></svg>">
+<script>try{var t=localStorage.getItem("asmMastery.theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}var z=localStorage.getItem("asmMastery.size");if(z&&z!=="md"){document.documentElement.setAttribute("data-size",z);}}catch(e){}</script>
+</head>
+<body>
+
+<div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+<div class="scroll-progress" aria-hidden="true"><i id="scrollBar"></i></div>
+
+<header class="topbar">
+  <button class="icon-btn menu-btn" id="menuBtn" aria-label="فتح القائمة" aria-expanded="false">☰</button>
+  <a href="#top" class="brand">
+    <span class="brand-mark">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="3.5" y="5" width="17" height="14" rx="3" stroke="#3fd0e8" stroke-width="1.5" fill="rgba(63,208,232,.08)"/>
+        <path d="M7 10.2 9.4 12 7 13.8" stroke="#b48cff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M11 14h5.5" stroke="#3fd0e8" stroke-width="1.7" stroke-linecap="round"/>
+        <path d="M7 2.5v2.5M12 2.5v2.5M17 2.5v2.5M7 19v2.5M12 19v2.5M17 19v2.5" stroke="#3fd0e8" stroke-width="1.2" stroke-linecap="round" opacity=".6"/>
+      </svg>
+    </span>
+    <span><b>ASM Mastery</b><small>x86-64 للـ Reverse Engineering</small></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-actions">
+    <div class="top-progress" title="نسبة إنجاز التمارين">
+      <svg class="ring" viewBox="0 0 24 24" aria-hidden="true"><circle class="bgc" cx="12" cy="12" r="10"></circle><circle class="fgc" id="topRing" cx="12" cy="12" r="10"></circle></svg>
+      <span><b id="topProgress">0%</b></span>
+    </div>
+    <div class="size-ctl" role="group" aria-label="حجم خط القراءة">
+      <button type="button" data-size-step="-1" aria-label="تصغير الخط" title="تصغير الخط">A−</button>
+      <button type="button" data-size-step="1" aria-label="تكبير الخط" title="تكبير الخط">A+</button>
+    </div>
+    <button class="icon-btn" id="themeBtn" aria-label="تبديل المظهر" title="تبديل المظهر">🌙</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar" aria-label="قائمة المراحل">
+    <div class="sidebar-head">
+      <span class="sidebar-title">خريطة الكورس</span>
+      <button class="icon-btn sidebar-close" id="sidebarClose" aria-label="إغلاق القائمة" style="width:30px;height:30px;font-size:13px">✕</button>
+    </div>
+    <div class="search-wrap">
+      <span class="ic">🔎</span>
+      <input type="search" id="navSearch" placeholder="دور على درس… (stack, flags, PEB)" autocomplete="off" aria-label="بحث في الدروس">
+      <kbd>/</kbd>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-card">
+      <div class="ring-wrap">
+        <svg class="progress-ring" viewBox="0 0 64 64" aria-hidden="true">
+          <defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#3fd0e8"/><stop offset="100%" stop-color="#b48cff"/></linearGradient></defs>
+          <circle class="bgc" cx="32" cy="32" r="26"></circle><circle class="fgc" id="sideRing" cx="32" cy="32" r="26"></circle>
+        </svg>
+        <div><div class="ring-num" id="sidePercent">0%</div><div class="ring-sub" id="sideCount">0 من 0 تمرين</div></div>
+      </div>
+      <h4>إنجازك بيتسجل تلقائيًا</h4>
+      <p>كل سؤال وتحدي ومعمل ومهمة RE بتخلّصها بيتحفظ في المتصفح، وتكمّل من نفس النقطة.</p>
+      <div class="side-actions"><button class="mini-btn" id="resetProgress">تصفير التقدّم</button><button class="mini-btn" id="printBtn">طباعة / PDF</button></div>
+    </div>
+    <div class="side-foot">اختصارات: <kbd>/</kbd> بحث · في المعمل <kbd>F7</kbd> step · <kbd>F8</kbd> over · <kbd>F9</kbd> run<br>x86-64 · NASM 3.01 · Intel syntax</div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <main id="top">
+    <div class="wrap">
+      <section class="hero" id="start">
+        <canvas id="hexRain" aria-hidden="true"></canvas>
+        <div class="hero-grid">
+          <div>
+            <span class="badge"><span class="pulse"></span> x86-64 · NASM · مصمم لمحللي الـ Malware</span>
+            <h1>اقرا لغة<br><span class="grad">الـ CPU نفسه</span></h1>
+            <p class="lead">
+              كورس <b>Assembly x86-64</b> كامل من الصفر للاحتراف، بعين <b>الـ Reverse Engineer</b>: هتفهم الـ CPU من جوه،
+              هتكتب برامج حقيقية بـ NASM، وهتقرا الـ disassembly اللي في <b>IDA</b> و<b>Ghidra</b> و<b>x64dbg</b> كأنك بتقرا C.
+              جوه الصفحة فيه <b>debugger كامل</b> بتمشي بيه instruction instruction وتشوف الـ registers والـ stack والـ flags بتتغير قدامك.
+            </p>
+            <div class="hero-cta">
+              <a href="#s01" class="btn btn-primary">🚀 ابدأ من أول درس</a>
+              <a href="#explorer" class="btn btn-ghost">🎬 المستكشف البصري</a>
+            </div>
+            <div class="hero-stats">
+              <div class="stat"><b data-count="{{N_SECTIONS}}">{{N_SECTIONS}}</b><span>مرحلة</span></div>
+              <div class="stat"><b data-count="{{N_QUIZ}}">{{N_QUIZ}}</b><span>سؤال تفاعلي</span></div>
+              <div class="stat"><b data-count="{{N_LABS}}">{{N_LABS}}</b><span>معمل وتحدي debugger</span></div>
+              <div class="stat"><b data-count="{{N_RE}}">{{N_RE}}</b><span>مهمة RE وcrackme</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="terminal" aria-label="الـ CPU بينفّذ برنامج حقيقي خطوة بخطوة">
+              <div class="term-bar"><div class="dots"><i></i><i></i><i></i></div><span>x64 Lab — live execution</span></div>
+              <div id="heroCpu" dir="ltr"><div class="hc-code"></div><div class="hc-regs"></div><div class="hc-note"></div></div>
+            </div>
+            <div class="term-caption"><span class="dot"></span> ده مش فيديو: الـ emulator بتاع الكورس بينفّذ الكود ده دلوقتي</div>
+          </div>
+        </div>
+      </section>
+
+{{SECTIONS}}
+
+      <footer>
+        <div>© <span id="year"></span> ASM Mastery for Reverse Engineers — كورس تعليمي تفاعلي. التشغيل الحقيقي عبر <a href="https://godbolt.org" target="_blank" rel="noopener">Compiler Explorer</a>، والمعمل emulator مكتوب للكورس ومتحقق منه ضد CPU حقيقي.</div>
+        <div class="f-links"><a href="#cheat">Cheat Sheet</a><a href="#sources">المصادر</a><a href="https://www.felixcloutier.com/x86/" target="_blank" rel="noopener">x86 Reference</a></div>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<canvas id="confetti" aria-hidden="true"></canvas>
+<div class="toast" id="toast" role="status" aria-live="polite"><span class="t-ico">✓</span><span id="toastTxt"></span></div>
+<script type="text/plain" id="ioLib">
+{{IO_LIB}}</script>
+<script src="assets/emu.js?v={{VER}}" defer></script>
+<script src="assets/lab.js?v={{VER}}" defer></script>
+<script src="assets/scenes.js?v={{VER}}" defer></script>
+<script src="assets/explorer.js?v={{VER}}" defer></script>
+<script src="assets/app.js?v={{VER}}" defer></script>
+<script src="assets/effects.js?v={{VER}}" defer></script>
+</body>
+</html>

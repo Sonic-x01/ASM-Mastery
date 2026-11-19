@@ -1,0 +1,264 @@
+      <section class="section" id="cheat" data-part="الجزء 5 · التطبيق" data-nav="Cheat Sheet والمصادر" data-icon="📋" data-keywords="cheat sheet reference registers calling conventions flags jcc syscalls peb pe offsets opcodes patching anti-debug shellcode signatures winapi constants arm64 ida x64dbg gdb shortcuts sources books next steps">
+        <div class="section-head">
+          <span class="section-index">✓</span>
+          <div>
+            <p class="eyebrow">المرجع السريع</p>
+            <h2>Cheat Sheet + المصادر + الخطوة الجاية</h2>
+            <p class="lede">كل اللي هتحتاجه وانت قاعد قدام IDA أو x64dbg — في مكان واحد وقابل للبحث. ارجعله كل ما تقابل حاجة مش فاكرها.</p>
+          </div>
+        </div>
+
+        <div class="cheat-search">
+          <span class="ic">🔎</span>
+          <input type="search" id="cheatSearch" placeholder="ابحث… (rcx, jb, PEB, 0x40, syscall, E9, cpuid, x30)" autocomplete="off" aria-label="بحث في المرجع">
+        </div>
+
+        <div class="cheat-grid" id="cheatGrid">
+          <div class="cheat-card">
+            <h4>Registers (x64)</h4>
+            <ul>
+              <li><code>rax eax ax ah al</code><span>64 · 32 · 16 · 8</span></li>
+              <li><code>r8 r8d r8w r8b</code><span>r8–r15: مفيش high byte</span></li>
+              <li>كتابة <code>eax</code> بتصفّر الـ 32 العليا<span>ax/al لأ</span></li>
+              <li><code>rip</code> · <code>rsp</code> · <code>rflags</code><span>IP · stack · flags</span></li>
+              <li>SysV callee-saved: <code>rbx rbp r12–r15</code><span></span></li>
+              <li>Win64 callee-saved: + <code>rdi rsi xmm6–15</code><span></span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Calling conventions</h4>
+            <ul>
+              <li><b>SysV</b>: <code>rdi rsi rdx rcx r8 r9</code><span>floats xmm0–7 · al = #xmm</span></li>
+              <li><b>Win64</b>: <code>rcx rdx r8 r9</code> + 32B shadow<span>بالمكان مش بالنوع</span></li>
+              <li>return <code>rax</code> (+<code>rdx</code>) · <code>xmm0</code><span></span></li>
+              <li>rsp % 16 == 0 قبل الـ <code>call</code><span>وإلا movaps crash</span></li>
+              <li><b>cdecl</b> <code>add esp, N</code> · <b>stdcall</b> <code>ret N</code><span>32-bit</span></li>
+              <li><b>fastcall</b> ecx, edx · <b>thiscall</b> this = ecx<span>32-bit</span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Flags والـ jumps</h4>
+            <ul>
+              <li><code>cmp a, b</code> = <code>sub</code> من غير تخزين<span>test = and</span></li>
+              <li>unsigned: <code>ja jae jb jbe</code><span>CF, ZF</span></li>
+              <li>signed: <code>jg jge jl jle</code><span>SF, OF, ZF</span></li>
+              <li><code>je/jz</code> ZF=1 · <code>js</code> SF=1 · <code>jo</code> OF=1<span></span></li>
+              <li><code>inc/dec</code> مبيلمسوش CF<span>فخ</span></li>
+              <li>floats (<code>comisd</code>) ← <code>ja/jb</code> + <code>jp</code> للـ NaN<span></span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Addressing وأحجام</h4>
+            <ul>
+              <li><code>[base + index*scale + disp]</code><span>scale 1/2/4/8</span></li>
+              <li><code>byte word dword qword</code><span>1 2 4 8</span></li>
+              <li><code>lea</code> = حساب من غير ذاكرة<span>×3 ×5 ×9، pointers</span></li>
+              <li><code>[rip+x]</code> = global في x64<span>32-bit: عنوان مطلق</span></li>
+              <li><code>movzx</code> unsigned · <code>movsx/movsxd/cdqe</code> signed<span>نوع المتغير!</span></li>
+              <li>little-endian: <code>0x11223344</code> = <code>44 33 22 11</code><span></span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Stack والـ frames</h4>
+            <ul>
+              <li><code>push</code> = rsp−=8; [rsp]=x<span>pop العكس</span></li>
+              <li><code>call</code> = push next + jmp · <code>ret</code> = pop rip<span></span></li>
+              <li>prologue <code>push rbp / mov rbp, rsp / sub rsp, N</code><span></span></li>
+              <li>locals <code>[rbp−x]</code> · ret <code>[rbp+8]</code><span>x64</span></li>
+              <li>32-bit: arg1 <code>[ebp+8]</code>، arg2 <code>[ebp+0Ch]</code><span></span></li>
+              <li>red zone (SysV): 128B تحت rsp<span>مش في Windows</span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Compiler idioms</h4>
+            <ul>
+              <li><code>xor eax, eax</code><span>= 0</span></li>
+              <li><code>imul magic</code> + <code>sar/shr</code><span>÷ ثابت (مرحلة 7)</span></li>
+              <li><code>lea eax,[rdi+7]; cmovns; sar 3</code><span>signed ÷ 8</span></li>
+              <li><code>sub x, 'a'; cmp x, 25; setbe</code><span>range check</span></li>
+              <li><code>bt mask, x</code><span>switch بـ bit test</span></li>
+              <li><code>neg; cmovs</code> abs · <code>cmp; cmovg</code> max<span></span></li>
+              <li><code>jmp other</code> في الآخر<span>tail call</span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Strings وSIMD</h4>
+            <ul>
+              <li><code>rep movsb/movsq</code><span>memcpy: rsi → rdi، rcx مرة</span></li>
+              <li><code>rep stosb/stosq</code><span>memset بـ al/rax</span></li>
+              <li><code>repne scasb</code><span>strlen القديم</span></li>
+              <li><code>pcmpeqb</code> + <code>pmovmskb</code> + <code>bsf</code><span>strlen/memchr حديث</span></li>
+              <li><code>pxor x,x</code> + <code>movups</code><span>struct = {0}</span></li>
+              <li><code>__xmm@5a5a…</code> + <code>xorps</code><span>stack string متشفرة</span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Linux syscalls</h4>
+            <ul>
+              <li><b>x64</b> <code>syscall</code>: rax + rdi rsi rdx r10 r8 r9<span>rcx, r11 بيتبوّظوا</span></li>
+              <li>read 0 · write 1 · open 2 · close 3<span>x64</span></li>
+              <li>mmap 9 · mprotect 10 · socket 41 · connect 42<span>x64</span></li>
+              <li>execve 59 · exit 60 · exit_group 231<span>x64</span></li>
+              <li><b>x86</b> <code>int 0x80</code>: exit 1 · read 3 · write 4 · execve 11<span>ebx ecx edx</span></li>
+              <li><b>arm64</b> <code>svc #0</code> x8: read 63 · write 64 · exit 93 · execve 221<span></span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Windows internals</h4>
+            <ul>
+              <li>PEB: <code>gs:[60h]</code> · <code>fs:[30h]</code><span>x64 · x86</span></li>
+              <li>BeingDebugged <code>+2</code> · NtGlobalFlag <code>+BCh</code>/<code>+68h</code><span></span></li>
+              <li>Ldr <code>+18h</code>/<code>+0Ch</code> → InMemoryOrder <code>+20h</code>/<code>+14h</code><span></span></li>
+              <li>DllBase من الـ link: <code>+20h</code>/<code>+10h</code><span>x64/x86</span></li>
+              <li>stub: <code>4C 8B D1 B8 SSN</code> + <code>0F 05</code><span>ntdll</span></li>
+              <li>Export dir: Names <code>+20h</code> · Ordinals <code>+24h</code> · Funcs <code>+1Ch</code><span></span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>PE offsets</h4>
+            <ul>
+              <li><code>MZ</code> · e_lfanew <code>[3Ch]</code> · <code>PE\0\0</code><span></span></li>
+              <li>Machine <code>NT+4</code> · #Sections <code>NT+6</code><span>14C / 8664</span></li>
+              <li>EntryPoint <code>NT+28h</code> · ImageBase <code>NT+30h</code><span>PE32+</span></li>
+              <li>Export dir <code>NT+88h</code> · Import <code>NT+90h</code><span>PE32+ (PE32: 78h/80h)</span></li>
+              <li>offset = RVA − VA + PointerToRawData<span>VA = base + RVA</span></li>
+              <li>section header 40B: VSize +8, VA +12, RawSize +16, Raw +20, Flags +36<span></span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Opcodes للـ patching</h4>
+            <ul>
+              <li><code>90</code> nop · <code>CC</code> int3 · <code>C3</code> ret<span></span></li>
+              <li><code>EB rel8</code> / <code>E9 rel32</code> jmp · <code>E8</code> call<span>rel من آخر الـ instruction</span></li>
+              <li><code>74/75</code> · <code>0F 84/85</code> jz/jnz<span>آخر bit = العكس</span></li>
+              <li><code>B8 imm32</code> mov eax · <code>31 C0</code> xor eax,eax<span></span></li>
+              <li><code>FF 15</code> call [rip+x] · <code>FF 25</code> jmp [rip+x]<span>IAT</span></li>
+              <li><code>0F 05</code> syscall · <code>CD 80</code> int 0x80<span></span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>WinAPI constants</h4>
+            <ul>
+              <li><code>0x3000</code> MEM_COMMIT|RESERVE<span></span></li>
+              <li><code>0x40</code> RWX · <code>0x20</code> RX · <code>0x04</code> RW<span>PAGE_*</span></li>
+              <li><code>0x1FFFFF</code> PROCESS_ALL_ACCESS<span></span></li>
+              <li><code>0x4</code> CREATE_SUSPENDED<span>hollowing</span></li>
+              <li><code>-11</code> (<code>0FFFFFFF5h</code>) STD_OUTPUT_HANDLE<span></span></li>
+              <li><code>0x80000001/2</code> HKCU / HKLM<span>persistence</span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Anti-RE: التوقيع ← الحل</h4>
+            <ul>
+              <li><code>[PEB+2]</code> / IsDebuggerPresent<span>ScyllaHide</span></li>
+              <li><code>rdtsc</code> × 2 + <code>cmp</code><span>متعملش step</span></li>
+              <li><code>cpuid</code> leaf 1 bit31 / <code>40000000h</code><span>anti-VM</span></li>
+              <li><code>NtSetInformationThread(…, 11h)</code><span>NOP</span></li>
+              <li>TLS callbacks<span>break on TLS</span></li>
+              <li>dispatcher + state var<span>flattening: تتبّع الـ state</span></li>
+              <li>tail jump لـ section تاني<span>OEP ← Scylla</span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>Shellcode signatures</h4>
+            <ul>
+              <li><code>FC 48 83 E4 F0 E8</code><span>MSF / Cobalt Strike x64</span></li>
+              <li><code>65 48 8B ?? 60</code> · <code>64 8B ?? 30</code><span>PEB access</span></li>
+              <li><code>E8 00 00 00 00</code> + pop<span>GetPC</span></li>
+              <li><code>D9 74 24 F4</code><span>fnstenv GetPC</span></li>
+              <li><code>EB ?? … E8 F?FFFFFF</code><span>jmp-call-pop</span></li>
+              <li>loader: VirtualAlloc 0x40 + memcpy + call<span>dump الـ buffer</span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>ARM64 في سطور</h4>
+            <ul>
+              <li>args <code>x0–x7</code> · ret <code>x0</code> · lr <code>x30</code> · fp <code>x29</code><span></span></li>
+              <li><code>bl</code> → x30 · <code>ret</code> → pc = x30<span>مفيش push</span></li>
+              <li><code>stp x29, x30, [sp, -N]!</code><span>prologue</span></li>
+              <li><code>adrp + add :lo12:</code><span>عنوان global</span></li>
+              <li><code>cmp/subs</code> + <code>b.ne</code> · <code>cbz</code> · <code>csel</code><span>flags مع s بس</span></li>
+              <li>كل instruction 4 bytes<span>مفيش desync</span></li>
+            </ul>
+          </div>
+          <div class="cheat-card">
+            <h4>اختصارات الأدوات</h4>
+            <ul>
+              <li><b>IDA</b>: <code>N</code> rename · <code>X</code> xrefs · <code>Y</code> type<span></span></li>
+              <li><b>IDA</b>: <code>R</code> char · <code>U</code>/<code>C</code>/<code>P</code> undef/code/func<span></span></li>
+              <li><b>IDA</b>: <code>Space</code> graph · <code>F5</code>/<code>Tab</code> decompile · <code>;</code> comment<span></span></li>
+              <li><b>x64dbg</b>: <code>F2</code> bp · <code>F7</code> into · <code>F8</code> over · <code>F9</code> run<span></span></li>
+              <li><b>x64dbg</b>: <code>Ctrl+F9</code> till ret · <code>Alt+F9</code> user code · <code>Ctrl+P</code> patch<span></span></li>
+              <li><b>gdb</b>: <code>starti</code> · <code>b *addr</code> · <code>si</code>/<code>ni</code> · <code>x/16xb $rsp</code><span></span></li>
+            </ul>
+          </div>
+        </div>
+
+        <h3 class="sub" id="sources">المصادر <span class="tag">curated</span></h3>
+        <div class="sources">
+          <a class="source" href="https://www.felixcloutier.com/x86/" target="_blank" rel="noopener"><span class="sico">📘</span><span><b>x86 Instruction Reference</b><span>كل instruction: الـ encoding والـ flags اللي بتغيرها — افتحه وانت بتقرا.</span><span class="url">felixcloutier.com/x86</span></span></a>
+          <a class="source" href="https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html" target="_blank" rel="noopener"><span class="sico">📚</span><span><b>Intel SDM</b><span>المرجع الرسمي لمعمارية x86-64 (ضخم — للبحث مش للقراية).</span><span class="url">intel.com · intel-sdm</span></span></a>
+          <a class="source" href="https://www.nasm.us/docs.php" target="_blank" rel="noopener"><span class="sico">🧾</span><span><b>NASM Manual</b><span>الـ syntax والـ macros والـ sections بالتفصيل.</span><span class="url">nasm.us/docs.php</span></span></a>
+          <a class="source" href="https://godbolt.org" target="_blank" rel="noopener"><span class="sico">⚙️</span><span><b>Compiler Explorer</b><span>نفس المحرك اللي شغّل أمثلة الكورس — شوف أي C بيتحوّل لإيه.</span><span class="url">godbolt.org</span></span></a>
+          <a class="source" href="https://gitlab.com/x86-psABIs/x86-64-ABI" target="_blank" rel="noopener"><span class="sico">📐</span><span><b>System V x86-64 ABI</b><span>الـ calling convention الرسمية لـ Linux.</span><span class="url">gitlab.com/x86-psABIs</span></span></a>
+          <a class="source" href="https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention" target="_blank" rel="noopener"><span class="sico">🪟</span><span><b>Microsoft x64 calling convention</b><span>shadow space والـ registers والـ unwind.</span><span class="url">learn.microsoft.com</span></span></a>
+          <a class="source" href="https://learn.microsoft.com/en-us/windows/win32/debug/pe-format" target="_blank" rel="noopener"><span class="sico">📄</span><span><b>PE Format</b><span>التوثيق الرسمي لكل field في الـ PE.</span><span class="url">learn.microsoft.com</span></span></a>
+          <a class="source" href="https://syscalls.mebeim.net/" target="_blank" rel="noopener"><span class="sico">🐧</span><span><b>Linux syscall tables</b><span>أرقام الـ syscalls لكل معمارية (x64، x86، ARM64…).</span><span class="url">syscalls.mebeim.net</span></span></a>
+          <a class="source" href="https://developer.arm.com/documentation/ddi0602/latest" target="_blank" rel="noopener"><span class="sico">📱</span><span><b>Arm A64 ISA</b><span>مرجع instructions الـ ARM64.</span><span class="url">developer.arm.com</span></span></a>
+          <a class="source" href="https://ghidra-sre.org/" target="_blank" rel="noopener"><span class="sico">🐉</span><span><b>Ghidra</b><span>disassembler + decompiler مجاني ومفتوح المصدر.</span><span class="url">ghidra-sre.org</span></span></a>
+          <a class="source" href="https://hex-rays.com/ida-free" target="_blank" rel="noopener"><span class="sico">🔍</span><span><b>IDA Free</b><span>المعيار في الصناعة — نسخة مجانية بـ decompiler x64.</span><span class="url">hex-rays.com/ida-free</span></span></a>
+          <a class="source" href="https://x64dbg.com/" target="_blank" rel="noopener"><span class="sico">🐞</span><span><b>x64dbg</b><span>الـ debugger الأشهر لتحليل الـ malware على Windows.</span><span class="url">x64dbg.com</span></span></a>
+          <a class="source" href="https://github.com/x64dbg/ScyllaHide" target="_blank" rel="noopener"><span class="sico">🛡️</span><span><b>ScyllaHide</b><span>تخفي الـ debugger عن أغلب حيل الـ anti-debug.</span><span class="url">github.com/x64dbg/ScyllaHide</span></span></a>
+          <a class="source" href="https://github.com/horsicq/Detect-It-Easy" target="_blank" rel="noopener"><span class="sico">🧪</span><span><b>Detect It Easy</b><span>الـ compiler والـ packer والـ entropy في ثانية.</span><span class="url">github.com/horsicq/Detect-It-Easy</span></span></a>
+          <a class="source" href="https://github.com/mandiant/capa" target="_blank" rel="noopener"><span class="sico">🧭</span><span><b>capa</b><span>القدرات (injection، persistence…) ومكانها في الكود.</span><span class="url">github.com/mandiant/capa</span></span></a>
+          <a class="source" href="https://github.com/mandiant/flare-floss" target="_blank" rel="noopener"><span class="sico">🧵</span><span><b>FLOSS</b><span>بيطلّع الـ stack strings والـ strings المتشفرة أوتوماتيك.</span><span class="url">github.com/mandiant/flare-floss</span></span></a>
+          <a class="source" href="https://github.com/mandiant/speakeasy" target="_blank" rel="noopener"><span class="sico">🎛️</span><span><b>speakeasy</b><span>emulator للـ shellcode والـ PEs بيطبع كل API call.</span><span class="url">github.com/mandiant/speakeasy</span></span></a>
+          <a class="source" href="https://hashdb.openanalysis.net/" target="_blank" rel="noopener"><span class="sico">#️⃣</span><span><b>HashDB</b><span>قاعدة API hashes لكل الخوارزميات المعروفة + plugin لـ IDA.</span><span class="url">hashdb.openanalysis.net</span></span></a>
+          <a class="source" href="https://github.com/mandiant/flare-vm" target="_blank" rel="noopener"><span class="sico">🧰</span><span><b>FLARE-VM</b><span>تحويل VM ويندوز لمعمل تحليل كامل.</span><span class="url">github.com/mandiant/flare-vm</span></span></a>
+          <a class="source" href="https://remnux.org/" target="_blank" rel="noopener"><span class="sico">🐧</span><span><b>REMnux</b><span>توزيعة Linux لتحليل الـ malware.</span><span class="url">remnux.org</span></span></a>
+          <a class="source" href="https://crackmes.one/" target="_blank" rel="noopener"><span class="sico">🔐</span><span><b>crackmes.one</b><span>آلاف الـ crackmes مرتبة بالصعوبة.</span><span class="url">crackmes.one</span></span></a>
+          <a class="source" href="https://flare-on.com/" target="_blank" rel="noopener"><span class="sico">🔥</span><span><b>Flare-On</b><span>مسابقة RE السنوية — التحديات القديمة وحلولها كنز.</span><span class="url">flare-on.com</span></span></a>
+          <a class="source" href="https://pwn.college/" target="_blank" rel="noopener"><span class="sico">🎓</span><span><b>pwn.college</b><span>تمارين assembly وRE وexploitation تفاعلية ومجانية.</span><span class="url">pwn.college</span></span></a>
+          <a class="source" href="https://bazaar.abuse.ch/" target="_blank" rel="noopener"><span class="sico">🦠</span><span><b>MalwareBazaar</b><span>samples حقيقية — جوه VM معزولة بس.</span><span class="url">bazaar.abuse.ch</span></span></a>
+        </div>
+
+        <h3 class="sub">كتب تستحق وقتك <span class="tag">ترتيب مقترح</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الكتاب</th><th>ليه</th></tr></thead>
+            <tbody>
+              <tr><td><b>Low-Level Programming</b> — Igor Zhirkov</td><td>x86-64 Assembly بـ NASM على Linux من الأساس للـ C</td></tr>
+              <tr><td><b>Computer Systems: A Programmer's Perspective</b> — Bryant &amp; O'Hallaron</td><td>الذاكرة، الـ assembly، الـ linking — أساس كل حاجة</td></tr>
+              <tr><td><b>Practical Malware Analysis</b> — Sikorski &amp; Honig</td><td>المنهجية الذهبية لتحليل الـ malware (اللابات قديمة بس الأفكار باقية)</td></tr>
+              <tr><td><b>Practical Reverse Engineering</b> — Dang, Gazet, Bachaalany</td><td>x86/x64/ARM، الـ Windows kernel، الـ obfuscation</td></tr>
+              <tr><td><b>The Ghidra Book</b> — Eagle &amp; Nance</td><td>احتراف Ghidra والـ scripting</td></tr>
+              <tr><td><b>Windows Internals</b> — Yosifovich, Russinovich et al.</td><td>الـ processes والذاكرة والـ loader من جوه</td></tr>
+              <tr><td><b>Evasive Malware</b> — Kyle Cucci</td><td>الـ anti-analysis والـ evasion الحديثة بالتفصيل</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub">خريطة الطريق بعد الكورس <span class="tag">next</span></h3>
+        <div class="steps">
+          <div class="step"><span class="n">01</span><div><h4>ثبّت المعمل</h4><p>VM ويندوز بـ FLARE-VM + VM REMnux، network معزولة (host-only)، وsnapshots نضيفة. <b>قبل أي sample حقيقي</b>.</p></div></div>
+          <div class="step"><span class="n">02</span><div><h4>اكسر binaries إنت كاتبها</h4><p>خد أمثلة الكورس (والـ C Mastery)، اعملها compile بـ <code>-O2 -s</code> وMSVC <code>/O2</code>، وافتحها في Ghidra/IDA من غير ما تبص على الكود. ده أسرع طريق للسرعة.</p></div></div>
+          <div class="step"><span class="n">03</span><div><h4>crackmes ← Flare-On</h4><p>حل crackmes.one بالترتيب، وبعدين تحديات Flare-On القديمة واقرا الـ write-ups الرسمية — هتتعلم طرق تفكير مختلفة.</p></div></div>
+          <div class="step"><span class="n">04</span><div><h4>Samples حقيقية + reports</h4><p>عائلات قديمة ومعروفة (ليها reports منشورة): حلّل واكتب report (IOCs، capabilities، ATT&amp;CK، config extractor) وقارنه بالـ reports الاحترافية.</p></div></div>
+          <div class="step"><span class="n">05</span><div><h4>اتعمق</h4><p>scripting لـ IDA/Ghidra بـ Python، unpacking متقدم، kernel drivers وWinDbg، ARM/Android، وكتابة YARA وsignatures للفرق الـ defensive.</p></div></div>
+        </div>
+
+        <div class="final-cta">
+          <h3>وصلت لآخر الرحلة 🎯</h3>
+          <p>من الـ bits والـ registers لحد الـ PEB walk والـ unpacking والـ ARM64. الفرق بينك وبين المحترف دلوقتي مش «معلومات أكتر» — ده <b>ساعات تطبيق</b>: افتح disassembler كل يوم.</p>
+          <div class="final-stats">
+            <div><b id="finalSolved">0</b> تمرين محلول</div>
+            <div><b id="finalTotal">0</b> إجمالي التمارين</div>
+            <div><b id="finalSections">0</b> مرحلة مكتملة</div>
+          </div>
+          <div style="margin-top:22px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+            <a href="#s27" class="btn btn-primary">🔑 الـ Crackmes</a>
+            <a href="#s28" class="btn btn-ghost">🛠️ المشاريع</a>
+            <a href="#explorer" class="btn btn-ghost">🎬 المستكشف البصري</a>
+          </div>
+        </div>
+      </section>

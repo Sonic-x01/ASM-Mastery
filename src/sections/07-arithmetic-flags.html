@@ -1,0 +1,393 @@
+      <section class="section" id="s07" data-part="الجزء 2 · الـ Instructions بالتفصيل" data-nav="الحساب والـ Flags" data-icon="🚩" data-keywords="add sub inc dec neg cmp adc sbb mul imul div idiv cbw cwde cdqe cwd cdq cqo flags rflags cf zf sf of pf af carry overflow sign zero parity signed unsigned divide error magic number">
+        <div class="section-head">
+          <span class="section-index">07</span>
+          <div>
+            <p class="eyebrow">المرحلة السابعة · أهم مرحلة في الكورس</p>
+            <h2>الحساب والـ Flags: إزاي الـ CPU "بيقرر"</h2>
+            <p class="lede">الـ CPU مفيهوش <code>if</code>. فيه حاجة أبسط: كل عملية حسابية بتسيب <b>flags</b> (bits صغيرة في RFLAGS) بتوصف النتيجة: صفر؟ سالب؟ حصل carry؟ حصل overflow؟ والـ conditional jumps بتقرا الـ flags دي. لو فهمت المرحلة دي صح، أي <code>if</code> في أي binary هيبقى واضح قدامك.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الحساب الأساسي <span class="tag">add · sub · inc · dec · neg · cmp</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>المعنى</th><th>الـ flags</th></tr></thead>
+            <tbody>
+              <tr><td><code>add dst, src</code></td><td><code>dst += src</code></td><td>كلهم (CF ZF SF OF PF AF)</td></tr>
+              <tr><td><code>sub dst, src</code></td><td><code>dst -= src</code></td><td>كلهم — CF = <b>borrow</b></td></tr>
+              <tr><td><code>cmp a, b</code></td><td>بيحسب <code>a − b</code> و<b>يرمي النتيجة</b></td><td>نفس <code>sub</code> بالظبط — ده الهدف منها</td></tr>
+              <tr><td><code>inc x</code> / <code>dec x</code></td><td><code>x++</code> / <code>x--</code></td><td>كلهم <b>ما عدا CF</b> ⚠️</td></tr>
+              <tr><td><code>neg x</code></td><td><code>x = −x</code> (two's complement)</td><td>CF = 1 لو x ≠ 0</td></tr>
+              <tr><td><code>adc dst, src</code></td><td><code>dst += src + CF</code></td><td>للحساب بأرقام أكبر من 64-bit</td></tr>
+              <tr><td><code>sbb dst, src</code></td><td><code>dst -= src + CF</code></td><td>وبتستخدم في حيل branchless (<code>sbb eax, eax</code> = 0 أو −1)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub">الـ 6 Flags <span class="tag">RFLAGS</span></h3>
+        <div class="grid-3">
+          <div class="card reveal"><div class="ico">0️⃣</div><h4>ZF — Zero</h4><p><b>1 لو النتيجة = 0</b>. بعد <code>cmp a, b</code>: ZF=1 ⇐ <code>a == b</code>. أكتر flag هتشوفه (<code>je</code>/<code>jne</code>).</p></div>
+          <div class="card reveal"><div class="ico">➖</div><h4>SF — Sign</h4><p>نسخة من <b>أعلى bit</b> في النتيجة. لو بتفسّر signed: SF=1 ⇐ النتيجة سالبة.</p></div>
+          <div class="card reveal"><div class="ico">🚚</div><h4>CF — Carry</h4><p>overflow <b>unsigned</b>: الجمع طلّع رقم أكبر من الحجم، أو الطرح احتاج "يستلف" (a &lt; b كـ unsigned). أساس <code>jb</code>/<code>ja</code>.</p></div>
+          <div class="card reveal"><div class="ico">💥</div><h4>OF — Overflow</h4><p>overflow <b>signed</b>: النتيجة الحقيقية خرجت برا المدى، فإشارتها طلعت غلط (موجب + موجب = سالب). أساس <code>jl</code>/<code>jg</code> مع SF.</p></div>
+          <div class="card reveal"><div class="ico">🎲</div><h4>PF — Parity</h4><p>1 لو عدد الـ bits اللي بواحد في <b>أول byte</b> من النتيجة زوجي. نادر في الكود العادي — بيظهر في مقارنات الـ floats (<code>jp</code> = NaN).</p></div>
+          <div class="card reveal"><div class="ico">🔟</div><h4>AF — Adjust</h4><p>carry من bit 3 لـ bit 4. موجود للـ BCD القديم. تقريبًا مش هتحتاجه — المعمل بيعرضه للأمانة.</p></div>
+        </div>
+        <p><b>السر كله:</b> الـ CPU مبيعرفش انت بتشتغل signed ولا unsigned، فبيحسب <b>التفسيرين مع بعض</b>: CF بيقولك "لو unsigned، حصل overflow؟"، وOF بيقولك "لو signed، حصل overflow؟". والـ instruction اللي بعدها (jump مثلًا) هي اللي بتختار أنهي واحد يهمها. افتكر دايرة الـ two's complement من المرحلة 02: عبور الخط البرتقالي = CF، والأحمر = OF.</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>العملية (8-bit)</th><th>النتيجة</th><th>unsigned</th><th>signed</th><th>CF</th><th>OF</th><th>ZF</th><th>SF</th></tr></thead>
+            <tbody>
+              <tr><td><code>0x7F + 0x01</code></td><td><code>0x80</code></td><td>127+1 = 128 ✓</td><td>127+1 = −128 ✗</td><td>0</td><td class="no">1</td><td>0</td><td>1</td></tr>
+              <tr><td><code>0xFF + 0x01</code></td><td><code>0x00</code></td><td>255+1 = 0 ✗</td><td>−1+1 = 0 ✓</td><td class="no">1</td><td>0</td><td>1</td><td>0</td></tr>
+              <tr><td><code>0x80 + 0x80</code></td><td><code>0x00</code></td><td>128+128 = 0 ✗</td><td>−128−128 = 0 ✗</td><td class="no">1</td><td class="no">1</td><td>1</td><td>0</td></tr>
+              <tr><td><code>0x05 − 0x07</code></td><td><code>0xFE</code></td><td>5−7 = 254 ✗ (borrow)</td><td>5−7 = −2 ✓</td><td class="no">1</td><td>0</td><td>0</td><td>1</td></tr>
+              <tr><td><code>0x80 − 0x01</code></td><td><code>0x7F</code></td><td>128−1 = 127 ✓</td><td>−128−1 = 127 ✗</td><td>0</td><td class="no">1</td><td>0</td><td>0</td></tr>
+              <tr><td><code>0x03 − 0x03</code></td><td><code>0x00</code></td><td>✓</td><td>✓</td><td>0</td><td>0</td><td>1</td><td>0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>جرّب أي حالة في الحاسبة دي، وشوف كمان <b>أنهي jump هيتنفذ</b> لو جت بعدها. خصوصًا: <code>cmp</code> بين <code>5</code> و<code>-1</code> — هتلاقي <code>jl</code> (signed) و<code>jb</code> (unsigned) بيقولوا عكس بعض!</p>
+        <div class="widget" data-widget="flags"></div>
+        <asm-lab id="s07-lab1" title="راقب الـ flags مع كل عملية">
+flags:
+    mov al, 0x7F
+    add al, 1           ; 127 + 1 -> 0x80 : OF=1 SF=1 CF=0
+    mov bl, 0xFF
+    add bl, 1           ; 255 + 1 -> 0x00 : CF=1 ZF=1 OF=0
+    mov cl, 5
+    sub cl, 7           ; 5 - 7   -> 0xFE : CF=1 (borrow) SF=1
+    mov dl, 3
+    cmp dl, 3           ; 3 - 3 = 0 thrown away: ZF=1, dl unchanged
+    stc                 ; set CF = 1 manually
+    inc dl              ; inc does NOT touch CF -> CF stays 1
+    neg dl              ; -4: CF=1 because dl != 0
+    ret
+</asm-lab>
+        <div class="callout warn"><span class="ci">⚠️</span><div><strong>فخ inc/dec</strong><p><code>inc</code> و<code>dec</code> <b>مبيغيروش CF</b> (اتعملوا كده عشان loops الـ multi-precision القديمة). يعني <code>add eax, 1</code> و<code>inc eax</code> مش متطابقين في الـ flags. الـ compilers بيختاروا اللي يناسبهم — متفترضش.</p></div></div>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>بتأثر على الـ flags إزاي</th></tr></thead>
+            <tbody>
+              <tr><td><code>add sub cmp neg adc sbb</code></td><td>الـ 6 كلهم حسب النتيجة</td></tr>
+              <tr><td><code>inc dec</code></td><td>الكل ما عدا CF</td></tr>
+              <tr><td><code>and or xor test</code></td><td>CF = OF = 0 دايمًا، ZF SF PF حسب النتيجة، AF undefined</td></tr>
+              <tr><td><code>mul imul</code></td><td>CF = OF = "النتيجة مش بتكفي في النص السفلي"، الباقي undefined</td></tr>
+              <tr><td><code>div idiv</code></td><td>كلهم undefined (متعتمدش عليهم)</td></tr>
+              <tr><td><code>mov lea push pop xchg jmp call ret movzx movsx</code></td><td>مبيلمسوش الـ flags خالص</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>"undefined" معناها إن Intel مش بتضمن قيمتها — المعمل بيعرضها بعلامة <b>?</b> بخط متقطع. الـ compilers عمرهم ما بيعتمدوا عليها.</p>
+
+        <h3 class="sub">الضرب: <code>mul</code> و<code>imul</code> <span class="tag">3 أشكال</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الشكل</th><th>العملية</th><th>هتشوفه فين</th></tr></thead>
+            <tbody>
+              <tr><td><code>mul src</code> (unsigned)</td><td><code>rdx:rax = rax × src</code> (النتيجة <b>ضعف الحجم</b>)</td><td>حسابات 128-bit، والـ magic division</td></tr>
+              <tr><td><code>imul src</code> (signed، operand واحد)</td><td><code>rdx:rax = rax × src</code></td><td>نادر</td></tr>
+              <tr><td><code>imul dst, src</code></td><td><code>dst = dst × src</code> (النتيجة بتتقص لنفس الحجم)</td><td><b>الأشهر</b> — C <code>a *= b</code> (signed وunsigned!)</td></tr>
+              <tr><td><code>imul dst, src, imm</code></td><td><code>dst = src × imm</code></td><td><code>i * 24</code> لحساب offset في array of structs</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>ملاحظة مهمة: الـ 2 و3-operand <code>imul</code> بتدي نفس الـ bits السفلى للـ signed والـ unsigned، فالـ compiler بيستخدمها للاتنين. يعني <code>imul</code> لوحدها مش بتثبت إن المتغير signed. والـ compilers بيحبوا يستبدلوا الضرب في ثابت بـ <code>lea</code> و<code>shl</code> لأنهم أسرع:</p>
+
+        <h3 class="sub">القسمة: <code>div</code> و<code>idiv</code> <span class="tag">الأخطر</span></h3>
+        <div class="mem">
+          <div class="mem-title">div / idiv src (64-bit)</div>
+          <div class="mem-row hl"><span class="addr">المقسوم</span><span class="val">rdx:rax</span><span class="what">128-bit: rdx النص العالي و rax النص السفلي</span></div>
+          <div class="mem-row"><span class="addr">المقسوم عليه</span><span class="val">src</span><span class="what">register أو memory (مفيش immediate!)</span></div>
+          <div class="mem-row vio"><span class="addr">الناتج</span><span class="val">rax</span><span class="what">quotient (الـ C <code>/</code>)</span></div>
+          <div class="mem-row ret"><span class="addr">الباقي</span><span class="val">rdx</span><span class="what">remainder (الـ C <code>%</code>)</span></div>
+          <div class="mem-cap">نفس الفكرة بالأحجام الأصغر: 32-bit = edx:eax ← eax و edx. و 8-bit = ax ← al (الناتج) و ah (الباقي).</div>
+        </div>
+        <p>عشان كده قبل أي قسمة لازم تجهّز <code>rdx</code>: للـ unsigned صفّره (<code>xor edx, edx</code>)، وللـ signed اعمل sign-extend لـ <code>rax</code> جواه (<code>cqo</code> / <code>cdq</code>). لو نسيت، النص العالي فيه زبالة والنتيجة غلط — أو أسوأ:</p>
+        <div class="callout danger"><span class="ci">💥</span><div><strong>Divide Error (#DE)</strong><p>القسمة بتعمل crash (exception) في حالتين: <b>القسمة على صفر</b>، أو لو <b>الناتج مش بيكفي</b> في الـ register (مثلًا <code>INT_MIN / −1</code>، أو <code>rdx</code> مش متصفّر). على Linux = <code>SIGFPE</code>، وعلى Windows = <code>EXCEPTION_INT_DIVIDE_BY_ZERO</code> (0xC0000094). فيه malware بيستخدم القسمة على صفر <b>عمدًا</b> عشان يطلّع exception يمشي بيها الـ control flow لـ handler بتاعه (anti-debugging/obfuscation).</p></div></div>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>من ← لـ</th><th>المعنى</th></tr></thead>
+            <tbody>
+              <tr><td><code>cbw</code></td><td>al ← ax</td><td>sign-extend byte لـ word</td></tr>
+              <tr><td><code>cwde</code></td><td>ax ← eax</td><td>word لـ dword</td></tr>
+              <tr><td><code>cdqe</code></td><td>eax ← rax</td><td>dword لـ qword (= <code>movsxd rax, eax</code>)</td></tr>
+              <tr><td><code>cwd</code></td><td>ax ← dx:ax</td><td>عشان idiv 16-bit</td></tr>
+              <tr><td><code>cdq</code></td><td>eax ← edx:eax</td><td>عشان idiv 32-bit — <code>edx</code> = 0 أو −1 حسب إشارة eax</td></tr>
+              <tr><td><code>cqo</code></td><td>rax ← rdx:rax</td><td>عشان idiv 64-bit</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <asm-lab id="s07-lab2" title="div و idiv … وأول crash ليك" expect-fault="de">
+divide:
+    mov eax, 100
+    xor edx, edx        ; unsigned: high half = 0
+    mov ecx, 7
+    div ecx             ; eax = 14 (quotient), edx = 2 (remainder)
+
+    mov eax, -100
+    cdq                 ; edx = 0xFFFFFFFF (sign of eax)
+    idiv ecx            ; eax = -14, edx = -2  (C truncates toward 0)
+
+    mov eax, 5
+    xor edx, edx
+    xor ecx, ecx        ; divisor = 0 ...
+    div ecx             ; #DE: divide by zero -> the program dies
+    ret
+</asm-lab>
+
+        <h3 class="sub">الـ Compiler بيكره <code>div</code> <span class="tag">real output</span></h3>
+        <p><code>div</code> بطيئة جدًا (عشرات الـ cycles)، فلما المقسوم عليه <b>ثابت</b>، الـ compilers بيستبدلوها بضرب في "رقم سحري" + shift. والقسمة على 2 للـ signed محتاجة تصحيح عشان C بتقرّب ناحية الصفر. شوف الـ output الحقيقي:</p>
+        <compiled file="arith.c" targets="gcc-O2,msvc-O2,gcc-O0" note="<b>div10</b>: الرقم <code>3435973837</code> = <code>0xCCCCCCCD</code> ≈ 2³⁵/10 — أشهر magic number في الدنيا: لما تشوفه اعرف إنها قسمة على 10. <b>avg</b>: <code>shr eax, 31</code> بيجيب bit الإشارة ويضيفه قبل الـ <code>sar</code> عشان −3/2 = −1 (مش −2). <b>mul12</b>: <code>x*3</code> بـ lea وبعدين <code>×4</code> بـ shift. <b>divide</b>: الحالة الوحيدة اللي فيها <code>idiv</code> حقيقية — لأن المقسوم عليه متغير.">
+int avg(int a, int b) { return (a + b) / 2; }
+unsigned int div10(unsigned int x) { return x / 10; }
+int mod8(int x) { return x % 8; }
+int mul12(int x) { return x * 12; }
+long divide(long a, long b) { return a / b; }
+</compiled>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>هتشوف الـ magic numbers دي كتير</strong><p>القاعدة: <code>mov eax, M</code> + <code>mul</code>/<code>imul</code> + <code>shr edx, k</code> = قسمة على <code>2^(32+k) / M</code> تقريبًا. أشهرهم: <code>0xCCCCCCCD</code> (÷10)، <code>0xAAAAAAAB</code> (÷3)، <code>0x55555556</code> (÷3 signed)، <code>0x66666667</code> (÷5/÷10 signed)، <code>0x92492493</code> (÷7 signed). IDA/Ghidra غالبًا بيحلّوها في الـ decompiler، بس في الـ disassembly لازم تعرفها. هنعمل جدول كامل في مرحلة أنماط الـ compiler.</p></div></div>
+
+        <h3 class="sub">حساب أكبر من 64-bit: <code>adc</code> <span class="tag">multi-precision</span></h3>
+        <p>عشان تجمع رقمين 128-bit (كل واحد في register-ين)، اجمع النص السفلي بـ <code>add</code>، والعالي بـ <code>adc</code> اللي بتزوّد الـ carry. ده نفس الجمع اللي بتعمله بإيدك في المدرسة (الحمل للخانة اللي بعدها). مكتبات التشفير (RSA، bignums) مليانة <code>adc</code> و<code>sbb</code> و<code>mul</code> — لو شفت loop فيها <code>adc</code> كتير، غالبًا crypto.</p>
+        <nasm-example file="add128.asm" io>
+; 128-bit addition: (2^64 - 1) + 1 = 2^64  ->  high = 1, low = 0
+section .text
+global _start
+_start:
+    mov rax, -1             ; a.low  = 0xFFFFFFFFFFFFFFFF
+    xor edx, edx            ; a.high = 0
+    add rax, 1              ; low  = 0, CF = 1 (carry out)
+    adc rdx, 0              ; high = 0 + 0 + CF = 1
+    mov rdi, rdx
+    call print_hex          ; 0x1
+    call print_nl
+    mov rdi, rax
+    call print_hex          ; 0x0
+    call print_nl
+    xor edi, edi
+    call exit
+</nasm-example>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 07</h3></div>
+
+          <quiz id="s07-q1" answer="2">
+            <q>بعد <code>mov al, 0xC8</code> و<code>add al, 0x50</code> (200 + 80)، الـ flags؟</q>
+            <o>CF=0, OF=0, al=0x118</o>
+            <o>CF=0, OF=1</o>
+            <o>CF=1, OF=0, al=0x18</o>
+            <o>CF=1, OF=1</o>
+            <good>280 مش بيكفي في byte ← CF=1 وal = 280−256 = 0x18. وكـ signed: −56 + 80 = 24 ✓ صح ← OF=0.</good>
+            <bad>احسب unsigned (200+80) وsigned (−56+80) كل واحد لوحده.</bad>
+          </quiz>
+          <quiz id="s07-q2" answer="0">
+            <q><code>cmp eax, ebx</code> مع <code>eax = 3</code> و<code>ebx = 3</code>. أنهي flag أكيد = 1؟</q>
+            <o>ZF</o>
+            <o>CF</o>
+            <o>SF</o>
+            <o>OF</o>
+            <good>3 − 3 = 0 ← ZF=1. ده أساس <code>je</code>.</good>
+            <bad>cmp بتطرح. النتيجة كام؟</bad>
+          </quiz>
+          <quiz id="s07-q3" answer="3">
+            <q><code>cmp ecx, edx</code> مع <code>ecx = 1</code> و<code>edx = 2</code>. الـ CF؟</q>
+            <o>0 لأن النتيجة سالبة بس</o>
+            <o>مش بيتغير</o>
+            <o>undefined</o>
+            <o>1 — حصل borrow لأن 1 &lt; 2 كأرقام unsigned</o>
+            <good>في الطرح CF = borrow = (a &lt; b unsigned). ده بالظبط اللي <code>jb</code> (jump if below) بيقراه.</good>
+            <bad>CF في الطرح معناه "a أصغر من b لو unsigned".</bad>
+          </quiz>
+          <quiz id="s07-q4" answer="1">
+            <q>قبل <code>idiv ecx</code> لقيت <code>cdq</code>. وظيفتها؟</q>
+            <o>تصفّر edx</o>
+            <o>تملا edx بإشارة eax (0 أو 0xFFFFFFFF) عشان المقسوم edx:eax يبقى نفس قيمة eax كـ signed</o>
+            <o>تحوّل لـ float</o>
+            <o>تقسم على 2</o>
+            <good>Convert Dword to Quad: sign-extend eax لـ edx:eax. للقسمة unsigned بتشوف <code>xor edx, edx</code> بدلها.</good>
+            <bad>المقسوم 64-bit في edx:eax. لازم النص العالي يتوافق مع إشارة eax.</bad>
+          </quiz>
+          <quiz id="s07-q5" answer="2">
+            <q>شفت <code>mov eax, 0CCCCCCCDh</code> ثم <code>mul ecx</code> ثم <code>shr edx, 3</code> ثم <code>mov eax, edx</code>. الكود بيحسب:</q>
+            <o><code>ecx * 0xCCCCCCCD</code></o>
+            <o><code>ecx % 10</code></o>
+            <o><code>ecx / 10</code> (unsigned)</o>
+            <o><code>ecx / 3</code></o>
+            <good>الـ magic number الأشهر: ÷10. ده بالظبط output الـ MSVC لـ div10 فوق.</good>
+            <bad>ارجع لجدول الـ magic numbers.</bad>
+          </quiz>
+          <quiz id="s07-q6" answer="0">
+            <q>أنهي حالة <b>مش</b> هتعمل Divide Error؟</q>
+            <o><code>edx:eax = 0:10</code> ÷ <code>3</code> باستخدام <code>div</code></o>
+            <o>أي حاجة ÷ 0</o>
+            <o><code>idiv</code> لـ <code>INT_MIN</code> ÷ <code>−1</code></o>
+            <o><code>div</code> بـ <code>edx = 5</code> و<code>ecx = 2</code> (الناتج أكبر من 32-bit)</o>
+            <good>10 ÷ 3 = 3 باقي 1 عادي. الباقيين: صفر، أو ناتج مش بيكفي (INT_MIN/-1 = +2³¹ مش بيكفي في int، وedx=5 يعني مقسوم ضخم).</good>
+            <bad>#DE بيحصل في القسمة على صفر أو لما الناتج يطلع أكبر من الـ register.</bad>
+          </quiz>
+          <quiz id="s07-q7" answer="3">
+            <q>الفرق بين <code>add eax, 1</code> و<code>inc eax</code>؟</q>
+            <o>inc أسرع دايمًا</o>
+            <o>add مبتغيرش الـ flags</o>
+            <o>مفيش فرق</o>
+            <o>inc مبتغيرش CF، add بتغيّره</o>
+            <good>النتيجة واحدة، بس CF مختلف. لو جت بعدها <code>jc</code>/<code>adc</code> الفرق هيبان.</good>
+            <bad>واحدة فيهم ليها استثناء في الـ flags.</bad>
+          </quiz>
+          <quiz id="s07-q8" answer="1">
+            <q>بعد <code>imul eax, ecx</code> لقيت <code>jo overflow_handler</code>. الكود الأصلي غالبًا:</q>
+            <o>بيقسم</o>
+            <o>بيتأكد إن الضرب signed مطلعش برا مدى int (زي <code>__builtin_mul_overflow</code> أو فحص حجم buffer)</o>
+            <o>بيقارن strings</o>
+            <o>مفيش معنى</o>
+            <good>imul بيرفع OF/CF لو النتيجة اتقصت. الكود الحذر (أو الـ allocators) بيفحص ده قبل ما يحسب حجم allocation — وغيابه = integer overflow vulnerability.</good>
+            <bad>jo = jump if overflow. إيه اللي بيعمل overflow في imul؟</bad>
+          </quiz>
+          <quiz id="s07-q9" answer="2">
+            <q><code>sbb eax, eax</code> بتعمل إيه؟</q>
+            <o>بتصفّر eax دايمًا</o>
+            <o>eax = 1 لو CF=1</o>
+            <o>eax = 0 لو CF=0، و<code>0xFFFFFFFF</code> (−1) لو CF=1</o>
+            <o>بتغيّر الإشارة</o>
+            <good>eax − eax − CF = −CF. حيلة branchless كلاسيكية لتحويل CF لـ mask (بتشوفها في كود MSVC القديم والـ hand-written).</good>
+            <bad>sbb = dst − src − CF، والـ dst = src.</bad>
+          </quiz>
+
+          <challenge id="s07-c1" title="ناتج وباقي القسمة" level="1" io>
+            <desc>اقسم <code>1000003</code> على <code>97</code> بـ <code>div</code>، واطبع الناتج في سطر والباقي في سطر. المطلوب:<br><code>10309</code><br><code>30</code></desc>
+            <starter>
+section .text
+global _start
+_start:
+    mov eax, 1000003
+    ; prepare edx, divide, print eax then edx
+
+    xor edi, edi
+    call exit
+</starter>
+            <expected>
+10309
+30
+</expected>
+            <solution>
+section .text
+global _start
+_start:
+    mov eax, 1000003
+    xor edx, edx        ; unsigned division: high half = 0
+    mov ecx, 97
+    div ecx             ; eax = quotient, edx = remainder
+    mov edi, eax
+    call print_int
+    call print_nl
+    mov edi, edx
+    call print_int
+    call print_nl
+    xor edi, edi
+    call exit
+</solution>
+          </challenge>
+          <challenge id="s07-c2" title="القسمة الـ signed زي C بالظبط" level="2" io>
+            <desc>في C: <code>-17 / 5 = -3</code> و<code>-17 % 5 = -2</code> (التقريب ناحية الصفر، والباقي بياخد إشارة المقسوم). اعملها بـ <code>idiv</code> على 64-bit (<code>cqo</code>) واطبع الاتنين:<br><code>-3</code><br><code>-2</code></desc>
+            <starter>
+section .text
+global _start
+_start:
+    mov rax, -17
+    ; ...
+    xor edi, edi
+    call exit
+</starter>
+            <expected>
+-3
+-2
+</expected>
+            <solution>
+section .text
+global _start
+_start:
+    mov rax, -17
+    cqo                 ; rdx:rax = sign-extended -17
+    mov rcx, 5
+    idiv rcx            ; rax = -3, rdx = -2
+    mov rdi, rax
+    call print_int
+    call print_nl
+    mov rdi, rdx
+    call print_int
+    call print_nl
+    xor edi, edi
+    call exit
+</solution>
+          </challenge>
+
+          <lab-challenge id="s07-lc1" title="جمع 128-bit" level="2" maxins="5">
+            <desc>رقمين 128-bit: الأول <code>rsi:rdi</code> (rsi = النص العالي)، والتاني <code>rcx:rdx</code>. رجّع المجموع في <code>rdx:rax</code> (rdx = العالي، rax = السفلي). استخدم <code>add</code> و<code>adc</code>.</desc>
+            <starter>
+add128:
+    ret
+</starter>
+            <solution>
+add128:
+    mov rax, rdi        ; low part of a
+    add rax, rdx        ; + low part of b, sets CF
+    mov rdx, rsi        ; high part of a  (mov keeps CF!)
+    adc rdx, rcx        ; + high part of b + carry
+    ret
+</solution>
+            <test setup="rdi=-1;rsi=0;rdx=1;rcx=0" expect="rax=0;rdx=1" label="(2^64-1) + 1"/>
+            <test setup="rdi=5;rsi=7;rdx=10;rcx=20" expect="rax=15;rdx=27"/>
+            <test setup="rdi=0x8000000000000000;rsi=1;rdx=0x8000000000000000;rcx=1" expect="rax=0;rdx=3"/>
+          </lab-challenge>
+          <lab-challenge id="s07-lc2" title="abs(x) من غير jumps" level="3" forbid="jcc,jmp,cmov" maxins="5">
+            <desc>رجّع <code>|x|</code> في <code>eax</code> (الـ input في <code>edi</code>، 32-bit signed) <b>من غير أي jump أو cmov</b>. الحيلة الكلاسيكية اللي الـ compilers بيستخدموها: <code>cdq</code> بتعمل <code>edx</code> = 0 أو −1 (mask)، وبعدين <code>(x XOR mask) − mask</code>. (<code>xor</code> = قلب الـ bits لو الـ mask كله واحد — هنتعمق فيها المرحلة الجاية.)</desc>
+            <starter>
+my_abs:
+    mov eax, edi
+    ret
+</starter>
+            <solution>
+my_abs:
+    mov eax, edi
+    cdq                 ; edx = 0 if x >= 0, else 0xFFFFFFFF
+    xor eax, edx        ; flip all bits when negative
+    sub eax, edx        ; ... and add 1  (subtracting -1)
+    ret
+</solution>
+            <test setup="rdi=-42" expect="eax=42"/>
+            <test setup="rdi=42" expect="eax=42"/>
+            <test setup="rdi=0" expect="eax=0"/>
+            <test setup="rdi=-1" expect="eax=1"/>
+          </lab-challenge>
+
+          <re-task id="s07-re1" title="إيه قيمة edx؟" level="1" answer="1" norm="int">
+            <desc>بعد الكود ده، إيه قيمة <code>edx</code>؟</desc>
+            <listing>
+mulhi:
+    mov eax, 0x10000
+    mov ecx, 0x10000
+    mul ecx             ; edx:eax = eax * ecx
+    ret
+</listing>
+            <verify setup="" expect="edx={ans}"/>
+            <hint>0x10000 × 0x10000 = 0x100000000 — عدّ الأصفار: ده محتاج 33 bit.</hint>
+            <explain>2¹⁶ × 2¹⁶ = 2³² = <code>0x1_00000000</code>. الـ 32 bit السفلى (eax) = 0، والعليا (edx) = 1. وCF=OF=1 لأن النتيجة مكفتش في eax.</explain>
+          </re-task>
+          <re-task id="s07-re2" title="الرقم السحري" level="2" answer="3" norm="int">
+            <desc>الدالة دي بتقسم <code>edi</code> (unsigned) على رقم ثابت. على كام؟</desc>
+            <listing>
+magic:
+    mov eax, edi
+    mov edx, 0xAAAAAAAB
+    mul edx
+    shr edx, 1
+    mov eax, edx
+    ret
+</listing>
+            <verify setup="edi=300" expect="eax=100"/>
+            <verify setup="edi=1000" expect="eax=333"/>
+            <hint>0xAAAAAAAB ≈ 2³³/3. أو جرّب في المعمل: افتح 🔬 Debug وغيّر edi.</hint>
+            <explain>(x × 0xAAAAAAAB) >> 32 >> 1 = x × 0xAAAAAAAB / 2³³ ≈ x / 3. القاعدة: المقسوم عليه ≈ 2^(32+shift) / M = 2³³ / 2863311531 ≈ 3.</explain>
+          </re-task>
+        </div>
+      </section>

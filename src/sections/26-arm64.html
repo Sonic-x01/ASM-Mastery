@@ -1,0 +1,132 @@
+      <section class="section" id="s26" data-part="الجزء 4 · الهندسة العكسية" data-nav="ARM64 (AArch64)" data-icon="📱" data-keywords="arm64 aarch64 arm x0 x30 w0 xzr wzr sp lr fp ldr str ldp stp ldrb strb adrp add movz movk bl blr ret b.eq cbz cbnz tbz csel bic svc x8 android iot mirai apple silicon">
+        <div class="section-head">
+          <span class="section-index">26</span>
+          <div>
+            <p class="eyebrow">المرحلة السادسة والعشرين · معمارية تانية</p>
+            <h2>ARM64: نفس الأفكار، لغة تانية</h2>
+            <p class="lede">IoT malware (Mirai وعائلته على الراوترات والكاميرات)، native libraries في تطبيقات Android، وmalware الـ macOS على Apple Silicon — كلهم ARM. الخبر الحلو: كل اللي اتعلمته (stack، calling conventions، loops، structs، idioms) بينطبق؛ اللي بيتغير هو «النطق». المرحلة دي قاموس x86 ⇄ ARM64.</p>
+          </div>
+        </div>
+
+        <div class="grid-3">
+          <div class="card reveal"><div class="ico">📏</div><h4>كل instruction = 4 bytes</h4><p>مفيش أطوال متغيرة ← مفيش desync ولا anti-disassembly بالقفز لنص instruction. الـ disassembly الخطي دايمًا صح.</p></div>
+          <div class="card reveal"><div class="ico">🏬</div><h4>Load/Store</h4><p>العمليات الحسابية على registers بس. الذاكرة بـ <code>ldr</code>/<code>str</code> (و<code>ldp</code>/<code>stp</code> لاتنين مرة واحدة). مفيش <code>add [mem], x</code>.</p></div>
+          <div class="card reveal"><div class="ico">🔗</div><h4>Link register</h4><p><code>bl</code> بيحط عنوان الرجوع في <code>x30</code> مش على الـ stack. الدوال اللي بتنادي غيرها بتحفظه بـ <code>stp x29, x30, …</code>.</p></div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>المفهوم</th><th>x86-64</th><th>ARM64</th></tr></thead>
+            <tbody>
+              <tr><td>Registers</td><td><code>rax…r15</code> (16)</td><td><code>x0–x30</code> (31) + <code>sp</code> + <code>xzr</code> (صفر دايمًا). <code>w0</code> = الـ 32 الصغار (الكتابة فيه بتصفّر الباقي — زي eax)</td></tr>
+              <tr><td>Args / return</td><td>rdi, rsi, rdx, rcx, r8, r9 / rax</td><td><code>x0–x7</code> / <code>x0</code></td></tr>
+              <tr><td>Callee-saved</td><td>rbx, rbp, r12–r15</td><td><code>x19–x28</code>، <code>x29</code> (fp)، <code>x30</code> (lr)</td></tr>
+              <tr><td>Load / store</td><td><code>mov eax, [rdi+4]</code></td><td><code>ldr w0, [x0, 4]</code> · <code>ldrb</code>/<code>ldrh</code>/<code>ldrsw</code> للأحجام</td></tr>
+              <tr><td>Address of global</td><td><code>lea rax, [rip+msg]</code></td><td><code>adrp x0, msg</code> + <code>add x0, x0, :lo12:msg</code> (صفحة + offset)</td></tr>
+              <tr><td>ثابت كبير</td><td><code>mov rax, 0x1122334455667788</code></td><td><code>movz</code> + 3 × <code>movk</code> (16 bit في المرة)</td></tr>
+              <tr><td>Compare + jump</td><td><code>cmp</code> / <code>jne</code></td><td><code>cmp</code> / <code>b.ne</code> · <code>cbz x0, L</code> · <code>tbz w0, #3, L</code> (bit test)</td></tr>
+              <tr><td>Flags</td><td>كل ALU instruction تقريبًا</td><td>بس اللي آخرها <b>s</b>: <code>adds</code>، <code>subs</code>، <code>cmp</code> (= subs xzr)، <code>tst</code></td></tr>
+              <tr><td>cmov / setcc</td><td><code>cmovl</code> / <code>setz</code></td><td><code>csel</code> / <code>cset</code></td></tr>
+              <tr><td>Call / indirect</td><td><code>call f</code> / <code>call rax</code></td><td><code>bl f</code> / <code>blr x8</code></td></tr>
+              <tr><td>Linux syscall</td><td><code>rax</code> = رقم، <code>syscall</code></td><td><code>x8</code> = رقم (<code>write = 64</code>، <code>exit = 93</code>)، <code>svc #0</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub">bl والـ LR <span class="tag">ASM Explorer</span></h3>
+        <div class="explorer" data-scene="arm64call"></div>
+
+        <compiled file="arm.c" targets="arm64-O2,gcc-O2,arm64-O0" note="<b>checksum</b>: <code>lsl w3, w0, 5</code> + <code>sub w0, w3, w0</code> = h×31 (نفس حيلة x86)، و<code>ldrb w3, [x2], 1</code> = اقرا byte وزوّد الـ pointer 1 (<b>post-index</b>) في instruction واحدة. <b>clamp</b>: <code>bic w0, w0, w0, asr #31</code> = <code>x &amp; ~(x&gt;&gt;31)</code> = max(x, 0) من غير branch، وبعدين <code>csel</code> (= cmov). <b>send_status</b>: الـ prologue <code>stp x29, x30, [sp, -32]!</code> وحفظ <code>x19</code> عشان يحتفظ بـ b عبر الـ <code>bl</code>. و<b>-O0</b> زي x86: كل حاجة بتتخزن على الـ stack (<code>str w0, [sp, 28]</code>).">
+struct beacon { int id; int port; char *host; };
+
+int checksum(const unsigned char *p, int n) {
+    int h = 7;
+    for (int i = 0; i < n; i++)
+        h = h * 31 + p[i];
+    return h;
+}
+
+int get_port(const struct beacon *b) { return b->port; }
+
+int clamp(int x) { return x > 255 ? 255 : (x < 0 ? 0 : x); }
+
+int report(struct beacon *b, int code);
+int send_status(struct beacon *b) {
+    int r = report(b, 0x1337);
+    return r + b->id;
+}
+</compiled>
+
+        <div class="callout re"><span class="ci">🔬</span><div><strong>ARM في التحليل العملي</strong><p><b>IoT</b>: ELF ARM32 (فيه وضع Thumb بـ instructions 2 bytes — الـ disassembler لازم يعرف) أو ARM64، غالبًا statically linked وstripped — FLIRT/Function ID مهمين جدًا. <b>Android</b>: <code>lib*.so</code> جوه الـ APK (<code>lib/arm64-v8a/</code>)، والـ entry من Java عن طريق <code>JNI_OnLoad</code> و<code>Java_com_pkg_Class_method</code>. <b>macOS</b>: Mach-O (مش ELF)، والـ syscalls بـ <code>svc #0x80</code> و<code>x16</code>. Ghidra وIDA بيدعموا الكل، وللـ dynamic: QEMU user-mode أو جهاز/emulator.</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 26</h3></div>
+
+          <quiz id="s26-q1" answer="1">
+            <q>دالة ARM64 مفيهاش ولا <code>stp</code> ولا <code>str</code> للـ stack، وبتنتهي بـ <code>ret</code>. عنوان الرجوع فين؟</q>
+            <o>على الـ stack عند <code>[sp]</code></o>
+            <o>في <code>x30</code> (LR) — دالة leaf مش محتاجة تحفظه</o>
+            <o>في <code>x29</code></o>
+            <o>في <code>pc</code></o>
+            <good>الـ bl حطه في x30، ومفيش bl جوه الدالة يمسحه، فـ ret بتستخدمه على طول.</good>
+            <bad>bl بتكتب فين؟</bad>
+          </quiz>
+          <quiz id="s26-q2" answer="3">
+            <q><code>adrp x0, 0x412000</code> ثم <code>add x0, x0, #0x3A8</code>. <code>x0</code> =</q>
+            <o>قيمة من الذاكرة</o>
+            <o><code>0x412000</code></o>
+            <o><code>0x3A8</code></o>
+            <o><code>0x4123A8</code> — عنوان (غالبًا string أو global)</o>
+            <good>adrp بيجيب عنوان الصفحة (4KB)، وadd بيكمّل الـ offset جواها. IDA/Ghidra بيجمعوهم لك ويعرضوا الـ string.</good>
+            <bad>صفحة + offset.</bad>
+          </quiz>
+          <quiz id="s26-q3" answer="0">
+            <q><code>add w0, w0, w1</code> ثم <code>b.eq L</code> مباشرة. الـ <code>b.eq</code> هتعتمد على:</q>
+            <o>flags قديمة من آخر instruction بتغير الـ flags (لأن <code>add</code> من غير s مبتلمسهاش)</o>
+            <o>نتيجة الـ add</o>
+            <o>w0 == w1</o>
+            <o>مش هتتنفذ</o>
+            <good>في ARM الـ flags بتتغير بس مع adds/subs/cmp/tst… فرق مهم عن x86.</good>
+            <bad>الـ s suffix.</bad>
+          </quiz>
+          <quiz id="s26-q4" answer="2">
+            <q>في IoT sample: <code>mov x8, #198</code> ثم <code>svc #0</code> (Linux ARM64). المقابل في x86-64 Linux؟</q>
+            <o>مستحيل تعرف</o>
+            <o>rax = 198 / syscall</o>
+            <o>نفس الفكرة بس <b>الأرقام مختلفة</b> — 198 في ARM64 = <code>socket</code> (في x86-64 = 41). لازم جدول الـ syscalls الخاص بالمعمارية</o>
+            <o>int 0x80</o>
+            <good>كل معمارية ليها جدول. ARM64 Linux: 198 socket، 203 connect، 221 execve، 64 write، 93 exit.</good>
+            <bad>الأرقام بتختلف بين المعماريات.</bad>
+          </quiz>
+
+          <re-task id="s26-re1" title="فك بـ ARM64" level="2" answer="http" norm="str">
+            <desc>الـ decoder ده اشتغل على 4 bytes: <code>32 29 14 13</code>. الناتج (كنص)؟</desc>
+            <listing>
+decode:                 // x0 = buf, w1 = len
+    cbz  w1, .done
+    mov  w2, 0x5A       // key
+.loop:
+    ldrb w3, [x0]
+    eor  w3, w3, w2     // eor = xor
+    strb w3, [x0], 1    // store, then x0 += 1
+    add  w2, w2, 3      // rolling key
+    subs w1, w1, 1
+    b.ne .loop
+.done:
+    ret
+</listing>
+            <hint>المفاتيح: 0x5A، 0x5D، 0x60، 0x63.</hint>
+            <explain>0x32^0x5A = 0x68 'h'، 0x29^0x5D = 0x74 't'، 0x14^0x60 = 0x74 't'، 0x13^0x63 = 0x70 'p' ← <b>http</b>. نفس منطق الـ XOR decoders اللي في x86 — بس <code>eor</code> و<code>strb …, 1</code> (post-index).</explain>
+          </re-task>
+          <re-task id="s26-re2" title="clamp" level="1" answer="255" norm="int">
+            <desc>دالة <code>clamp</code> من الـ compiled view: <code>bic w0, w0, w0, asr #31</code> / <code>mov w1, 255</code> / <code>cmp w0, 255</code> / <code>csel w0, w0, w1, le</code>. الناتج لـ <code>w0 = 300</code>؟</desc>
+            <hint>csel w0, w0, w1, le = (le) ? w0 : w1.</hint>
+            <explain>300 موجب ← bic ملهاش تأثير. 300 &gt; 255 ← الشرط le غلط ← w0 = w1 = <b>255</b>.</explain>
+          </re-task>
+          <re-task id="s26-re3" title="الـ syscall" level="1" answer="exit" norm="text">
+            <desc>آخر shellcode ARM64 Linux: <code>mov x0, #0</code> / <code>mov x8, #93</code> / <code>svc #0</code>. أنهي syscall؟</desc>
+            <hint>شوف جدول المقارنة فوق.</hint>
+            <explain>x8 = 93 = <b>exit</b> (و x0 = 0 = الكود). في x86-64 نفس الحاجة: rax = 60.</explain>
+          </re-task>
+        </div>
+      </section>

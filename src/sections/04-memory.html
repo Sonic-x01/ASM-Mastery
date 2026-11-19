@@ -1,0 +1,331 @@
+      <section class="section" id="s04" data-part="الجزء 1 · الآلة من جوه" data-nav="الذاكرة والعناوين" data-icon="🗺️" data-keywords="memory virtual memory paging page table pages 4096 canonical address process layout text data bss heap stack aslr dep nx rwx permissions addressing modes base index scale displacement rip relative lea mov byte ptr dword ptr qword ptr alignment segmentation fault">
+        <div class="section-head">
+          <span class="section-index">04</span>
+          <div>
+            <p class="eyebrow">المرحلة الرابعة · خريطة الـ process</p>
+            <h2>الذاكرة والعناوين: فين كل حاجة، وإزاي توصلها</h2>
+            <p class="lede">أي instruction بتلمس الذاكرة فيها <b>[ … ]</b>. لو فهمت إيه اللي جوه الأقواس وإزاي بيتحسب، هتقدر تشوف في <code>[rbx+rcx*8+10h]</code> إنها <code>obj->items[i]</code>. والأهم: هتفهم الخريطة اللي الـ process عايش فيها — الكود فين، الـ stack فين، والـ malware بيحقن نفسه فين.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الـ Virtual Memory: كل process فاكر نفسه لوحده <span class="tag">paging</span></h3>
+        <p>العنوان اللي بتشوفه في الـ debugger (زي <code>0x401000</code>) <b>مش</b> مكان حقيقي في الـ RAM. ده <b>عنوان افتراضي (virtual)</b>. الـ CPU (بوحدة اسمها MMU) بيترجمه لعنوان فعلي باستخدام <b>جدول pages</b> خاص بكل process. الذاكرة متقسمة لـ <b>pages</b> كل واحدة <b>4 KB</b> (<code>0x1000</code> byte)، وكل page ليها صلاحيات.</p>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 330" role="img" aria-label="virtual to physical memory">
+            <text x="130" y="28" text-anchor="middle" class="d-tb d-acc">Process A</text>
+            <text x="870" y="28" text-anchor="middle" class="d-tb d-vio">Process B</text>
+            <text x="500" y="28" text-anchor="middle" class="d-tb">Physical RAM</text>
+            <g font-size="11.5">
+              <rect x="40" y="44" width="180" height="40" rx="7" class="d-box"/><text x="130" y="69" text-anchor="middle" class="d-t">0x401000 code</text>
+              <rect x="40" y="90" width="180" height="40" rx="7" class="d-box"/><text x="130" y="115" text-anchor="middle" class="d-t">0x403000 data</text>
+              <rect x="40" y="136" width="180" height="40" rx="7" class="d-dim"/><text x="130" y="161" text-anchor="middle" class="d-tx">unmapped</text>
+              <rect x="40" y="182" width="180" height="40" rx="7" class="d-box"/><text x="130" y="207" text-anchor="middle" class="d-t">0x7FFF…E000 stack</text>
+              <rect x="780" y="44" width="180" height="40" rx="7" class="d-box2"/><text x="870" y="69" text-anchor="middle" class="d-t">0x401000 code</text>
+              <rect x="780" y="90" width="180" height="40" rx="7" class="d-dim"/><text x="870" y="115" text-anchor="middle" class="d-tx">unmapped</text>
+              <rect x="780" y="136" width="180" height="40" rx="7" class="d-box2"/><text x="870" y="161" text-anchor="middle" class="d-t">0x403000 data</text>
+              <rect x="780" y="182" width="180" height="40" rx="7" class="d-box2"/><text x="870" y="207" text-anchor="middle" class="d-t">0x7FFF…E000 stack</text>
+              <rect x="410" y="44" width="180" height="32" rx="6" class="d-box"/><text x="500" y="65" text-anchor="middle" class="d-tx">frame 0x1A3000</text>
+              <rect x="410" y="80" width="180" height="32" rx="6" class="d-box2"/><text x="500" y="101" text-anchor="middle" class="d-tx">frame 0x1A4000</text>
+              <rect x="410" y="116" width="180" height="32" rx="6" class="d-dim"/><text x="500" y="137" text-anchor="middle" class="d-tx">kernel / other</text>
+              <rect x="410" y="152" width="180" height="32" rx="6" class="d-box"/><text x="500" y="173" text-anchor="middle" class="d-tx">frame 0x2B0000</text>
+              <rect x="410" y="188" width="180" height="32" rx="6" class="d-box2"/><text x="500" y="209" text-anchor="middle" class="d-tx">frame 0x2B1000</text>
+              <rect x="410" y="224" width="180" height="32" rx="6" class="d-box"/><text x="500" y="245" text-anchor="middle" class="d-tx">frame 0x3C7000</text>
+              <rect x="410" y="260" width="180" height="32" rx="6" class="d-box2"/><text x="500" y="281" text-anchor="middle" class="d-tx">frame 0x3C8000</text>
+            </g>
+            <path class="d-ar-acc d-flow" d="M222,64 C320,64 320,60 408,60"/>
+            <path class="d-ar-acc d-flow" d="M222,110 C320,110 320,168 408,168"/>
+            <path class="d-ar-acc d-flow" d="M222,202 C320,202 320,240 408,240"/>
+            <path class="d-ar-vio d-flow" d="M778,64 C690,64 690,96 592,96"/>
+            <path class="d-ar-vio d-flow" d="M778,156 C690,156 690,204 592,204"/>
+            <path class="d-ar-vio d-flow" d="M778,202 C690,202 690,276 592,276"/>
+            <text x="500" y="318" text-anchor="middle" class="d-ts ar">نفس العنوان الافتراضي 0x401000 في الـ 2 processes بيروح لـ frames فعلية مختلفة — عزل كامل</text>
+          </svg>
+          <figcaption>عشان كده الـ malware مقدرش يكتب في process تاني بـ <code>mov</code> عادي — لازم يطلب من الـ kernel (<code>WriteProcessMemory</code> / <code>NtWriteVirtualMemory</code>)، وده بالظبط اللي الـ <b>process injection</b> بيعمله وبيظهر في الـ API calls.</figcaption>
+        </figure>
+        <div class="grid-3">
+          <div class="card reveal"><div class="ico">📏</div><h4>48-bit بس</h4><p>الـ pointer 64-bit، بس المعالج بيستخدم <b>48 bit</b> (أو 57 مع paging خماسي). الـ user space على Linux وWindows من <code>0</code> لحد <code>0x00007FFFFFFFFFFF</code>، والـ kernel في النص العالي <code>0xFFFF8000…</code>.</p></div>
+          <div class="card reveal"><div class="ico">🚫</div><h4>Canonical addresses</h4><p>الـ bits من 47 لـ 63 لازم كلها زي bit 47. عنوان زي <code>0x0000800000000000</code> "non-canonical" ← أي وصول ليه = crash فوري. (بتشوفه في exploits فاشلة.)</p></div>
+          <div class="card reveal"><div class="ico">🕳️</div><h4>Null page</h4><p>أول <b>64 KB</b> من الذاكرة مش متعملها map على Windows وLinux، عشان أي <code>NULL</code> pointer dereference يعمل crash بدل ما يقرا زبالة.</p></div>
+        </div>
+
+        
+        <p>🎬 تابع عنوان واحد وهو بيتترجم من افتراضي لفعلي — وشوف إمتى بيحصل الـ Segmentation fault بالظبط:</p>
+        <div class="explorer" data-scene="vmem"></div>
+
+        <h3 class="sub">خريطة الـ Process <span class="tag">memory layout</span></h3>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 470" role="img" aria-label="process memory layout">
+            <text x="250" y="24" text-anchor="middle" class="d-tb">Linux x64 (برنامج non-PIE زي برامج الكورس)</text>
+            <g font-size="12">
+              <rect x="80" y="36" width="340" height="44" rx="8" class="d-box5"/><text x="96" y="63" class="d-t">0xFFFF800000000000+</text><text x="404" y="63" class="d-ts ar">kernel (ممنوع)</text>
+              <rect x="80" y="86" width="340" height="56" rx="8" class="d-box3"/><text x="96" y="110" class="d-t">0x00007FFFFFFFF000</text><text x="404" y="110" class="d-ts ar">قمة الـ stack</text><text x="96" y="132" class="d-tx">stack ↓ grows down</text>
+              <rect x="80" y="148" width="340" height="44" rx="8" class="d-box2"/><text x="96" y="175" class="d-t">0x00007FFFF7xxxxxx</text><text x="404" y="175" class="d-ts ar">libc.so ومكتبات</text>
+              <rect x="80" y="198" width="340" height="44" rx="8" class="d-dim"/><text x="250" y="225" text-anchor="middle" class="d-ts ar">مساحة فاضية ضخمة</text>
+              <rect x="80" y="248" width="340" height="44" rx="8" class="d-box4"/><text x="96" y="275" class="d-tx">heap ↑ grows up</text><text x="404" y="275" class="d-ts ar">malloc</text>
+              <rect x="80" y="298" width="340" height="34" rx="8" class="d-box"/><text x="96" y="320" class="d-t">.bss</text><text x="404" y="320" class="d-ts ar">globals = 0 (rw-)</text>
+              <rect x="80" y="338" width="340" height="34" rx="8" class="d-box"/><text x="96" y="360" class="d-t">.data</text><text x="404" y="360" class="d-ts ar">globals بقيمة (rw-)</text>
+              <rect x="80" y="378" width="340" height="34" rx="8" class="d-box"/><text x="96" y="400" class="d-t">.rodata</text><text x="404" y="400" class="d-ts ar">ثوابت و strings (r--)</text>
+              <rect x="80" y="418" width="340" height="34" rx="8" class="d-box2"/><text x="96" y="440" class="d-t">0x401000 .text</text><text x="404" y="440" class="d-ts ar">الكود (r-x)</text>
+            </g>
+            <text x="750" y="24" text-anchor="middle" class="d-tb">Windows x64</text>
+            <g font-size="12">
+              <rect x="580" y="36" width="340" height="44" rx="8" class="d-box5"/><text x="596" y="63" class="d-t">0xFFFF800000000000+</text><text x="904" y="63" class="d-ts ar">kernel</text>
+              <rect x="580" y="86" width="340" height="56" rx="8" class="d-box2"/><text x="596" y="110" class="d-t">0x00007FF8xxxxxxxx</text><text x="904" y="110" class="d-ts ar">ntdll، kernel32، DLLs</text><text x="596" y="132" class="d-tx">(ASLR: نفس العنوان في كل الـ processes لحد restart)</text>
+              <rect x="580" y="148" width="340" height="56" rx="8" class="d-box"/><text x="596" y="172" class="d-t">0x00007FF6xxxxxxxx</text><text x="904" y="172" class="d-ts ar">الـ EXE نفسه (مع ASLR)</text><text x="596" y="194" class="d-tx">ImageBase الافتراضي 0x140000000</text>
+              <rect x="580" y="210" width="340" height="44" rx="8" class="d-box4"/><text x="596" y="237" class="d-tx">heaps (HeapAlloc / VirtualAlloc)</text>
+              <rect x="580" y="260" width="340" height="44" rx="8" class="d-box3"/><text x="596" y="287" class="d-t">0x000000xxxxxxxxxx</text><text x="904" y="287" class="d-ts ar">stacks الـ threads</text>
+              <rect x="580" y="310" width="340" height="44" rx="8" class="d-box"/><text x="596" y="337" class="d-tx">PEB / TEB (gs:[30h] / gs:[60h])</text>
+              <rect x="580" y="360" width="340" height="44" rx="8" class="d-dim"/><text x="596" y="387" class="d-t">0x0 – 0xFFFF</text><text x="904" y="387" class="d-ts ar">null page (ممنوع)</text>
+            </g>
+          </svg>
+          <figcaption>العناوين الفعلية بتتغير بسبب <b>ASLR</b>، بس <b>الشكل</b> ثابت. مع الوقت هتعرف من شكل العنوان بس هو stack ولا heap ولا كود DLL.</figcaption>
+        </figure>
+
+        <h3 class="sub">صلاحيات الـ Pages: R / W / X <span class="tag">DEP · NX</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>المنطقة</th><th>الصلاحيات</th><th>لو حاولت…</th></tr></thead>
+            <tbody>
+              <tr><td><code>.text</code></td><td><code>r-x</code></td><td>تكتب فيها ⇐ crash (access violation / SIGSEGV)</td></tr>
+              <tr><td><code>.rodata</code> / <code>.rdata</code></td><td><code>r--</code></td><td>تكتب أو تنفّذ ⇐ crash</td></tr>
+              <tr><td><code>.data</code> / <code>.bss</code> / heap / stack</td><td><code>rw-</code></td><td>تنفّذ كود منها ⇐ crash (ده الـ <b>NX bit / DEP</b>)</td></tr>
+              <tr><td>ذاكرة الـ shellcode</td><td><code>rwx</code> 🚩</td><td>كل حاجة مسموحة — <b>red flag</b> في أي تحليل</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout mal"><span class="ci">🦠</span><div><strong>RWX = إنذار</strong><p>البرامج الطبيعية نادرًا ما بتحتاج ذاكرة writable وexecutable في نفس الوقت. لما تشوف <code>VirtualAlloc(…, 0x40)</code> (<code>PAGE_EXECUTE_READWRITE</code> = <code>0x40</code>) أو <code>VirtualProtect</code> بيحوّل ذاكرة لـ executable، أو <code>mprotect(…, PROT_READ|PROT_WRITE|PROT_EXEC)</code> = 7 على Linux، غالبًا الـ malware بيفك تشفير payload ويستعد ينفّذه. حط breakpoint بعدها وdump الذاكرة دي.</p></div></div>
+        <p>جرّب بنفسك: الكود ده بيحاول يكتب في string موجودة في <code>.rodata</code>. المعمل هيعمل crash زي الـ CPU الحقيقي بالظبط:</p>
+        <asm-lab id="s04-lab1" title="Segmentation fault: كتابة في ذاكرة read-only" expect-fault="segv">
+section .rodata
+msg: db "constant", 0
+
+section .text
+crash:
+    lea rax, [rel msg]      ; rax = address of the string (fine)
+    mov bl, [rax]           ; reading is allowed  -> bl = 'c'
+    mov byte [rax], 'C'     ; writing to r-- page -> SEGFAULT
+    ret
+</asm-lab>
+
+        <h3 class="sub">الـ Memory Operand: <code>[base + index×scale + disp]</code> <span class="tag">addressing modes</span></h3>
+        <p>أي وصول للذاكرة في x86-64 عنوانه بيتحسب بالمعادلة دي (كل جزء اختياري):</p>
+        <div class="mem">
+          <div class="mem-title">effective address = base + index × scale + displacement</div>
+          <div class="mem-row hl"><span class="addr">base</span><span class="val">أي register 64-bit</span><span class="what">بداية الحاجة (pointer لـ array أو struct أو rbp/rsp)</span></div>
+          <div class="mem-row vio"><span class="addr">index</span><span class="val">أي register ما عدا rsp</span><span class="what">رقم العنصر (i)</span></div>
+          <div class="mem-row ret"><span class="addr">scale</span><span class="val">1 أو 2 أو 4 أو 8 بس</span><span class="what">حجم العنصر: char / short / int / pointer</span></div>
+          <div class="mem-row"><span class="addr">disp</span><span class="val">رقم ثابت (signed، لحد 32-bit)</span><span class="what">offset الـ field، أو مكان المتغير على الـ stack</span></div>
+        </div>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الشكل</th><th>معناه في C</th><th>هتشوفه فين</th></tr></thead>
+            <tbody>
+              <tr><td><code>[rax]</code></td><td><code>*p</code></td><td>pointer dereference</td></tr>
+              <tr><td><code>[rcx+18h]</code></td><td><code>obj-&gt;field</code> (offset 0x18)</td><td>structs و objects</td></tr>
+              <tr><td><code>[rbp-14h]</code> / <code>[rsp+28h]</code></td><td>متغير محلي</td><td>كل دالة تقريبًا</td></tr>
+              <tr><td><code>[rdi+rcx*4]</code></td><td><code>arr[i]</code> (int)</td><td>loops على arrays</td></tr>
+              <tr><td><code>[rax+rcx*8+10h]</code></td><td><code>s-&gt;ptrs[i]</code> (array of pointers عند offset 0x10)</td><td>structs فيها arrays</td></tr>
+              <tr><td><code>[rip+2EDCh]</code> / <code>[rel g]</code></td><td>global / static / string ثابت</td><td>أي وصول لـ .data / .rdata في x64</td></tr>
+              <tr><td><code>gs:[60h]</code></td><td><code>NtCurrentTeb()->ProcessEnvironmentBlock</code></td><td>Windows internals</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="widget" data-widget="addr"></div>
+
+        <h3 class="sub">حجم الوصول: <code>byte</code> / <code>word</code> / <code>dword</code> / <code>qword</code> <span class="tag">size specifiers</span></h3>
+        <p>العنوان بيقول "فين"، بس مش بيقول "قد إيه". الحجم بييجي من الـ register التاني: <code>mov eax, [rbx]</code> بتقرا 4 bytes لأن eax 32-bit. لو مفيش register (زي <code>mov [rbx], 5</code>) لازم تقول الحجم صراحة:</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>NASM (الكورس)</th><th>IDA / MASM / x64dbg</th><th>gdb / objdump (AT&amp;T)</th></tr></thead>
+            <tbody>
+              <tr><td><code>mov dword [rbx], 5</code></td><td><code>mov dword ptr [rbx], 5</code></td><td><code>movl $5, (%rbx)</code></td></tr>
+              <tr><td><code>movzx eax, byte [rdi+rcx]</code></td><td><code>movzx eax, byte ptr [rdi+rcx]</code></td><td><code>movzbl (%rdi,%rcx), %eax</code></td></tr>
+              <tr><td><code>mov rax, [rel counter]</code></td><td><code>mov rax, cs:counter</code> (IDA) / <code>qword ptr [rip+…]</code></td><td><code>mov counter(%rip), %rax</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>المعمل بتاعنا بيقبل الشكلين (<code>dword</code> و<code>dword ptr</code>) عشان تقدر تنسخ من IDA أو x64dbg مباشرة.</p>
+
+        <h3 class="sub">RIP-relative: إزاي الكود الحديث بيوصل للـ globals <span class="tag">[rel label]</span></h3>
+        <p>في x64، الطريقة الطبيعية للوصول لمتغير global هي <b>نسبةً لـ RIP</b>: الـ instruction بتخزّن <b>المسافة</b> من نهايتها للمتغير، مش العنوان نفسه. ده بيخلي الكود يشتغل في أي مكان يتحمّل فيه (ضروري مع ASLR، وده اللي بيخلي الـ shellcode الحديث position-independent بسهولة).</p>
+        <nasm-example file="ripRel.asm" io>
+default rel                 ; make [label] mean [rel label]
+
+section .data
+counter: dq 41
+
+section .text
+global _start
+_start:
+    mov rax, [counter]      ; RIP-relative read  (48 8B 05 + disp32)
+    add rax, 1
+    mov [counter], rax      ; RIP-relative write
+    mov rdi, [counter]
+    call print_int          ; 42
+    call print_nl
+    lea rdi, [counter]      ; the ADDRESS itself (no memory read)
+    call print_hex
+    call print_nl
+    xor edi, edi
+    call exit
+</nasm-example>
+        <p>اضغط <b>⚙ Bytes</b>: هتلاقي <code>mov rax, [counter]</code> = <code>48 8B 05 xx xx xx xx</code>. الـ 4 bytes الأخيرة = <code>counter − (عنوان الـ instruction اللي بعدها)</code>. الـ disassembler بيحسبها لك ويكتب <code>[rip+0x2FF9]</code> وجنبها اسم المتغير. في IDA هتشوفها <code>mov rax, cs:counter</code>.</p>
+        <div class="callout warn"><span class="ci">⚠️</span><div><strong>NASM: متنساش <code>default rel</code></strong><p>من غير <code>default rel</code> (أو <code>[rel x]</code>)، NASM بيستخدم عنوان <b>مطلق 32-bit</b> (<code>8B 04 25 …</code>) — بيشتغل في برامجنا البسيطة، بس بيفشل في أي برنامج PIE أو DLL. NASM 3 بقى بيطلع warning عن كده. عوّد نفسك تكتبها في أول كل ملف.</p></div></div>
+
+        <h3 class="sub"><code>lea</code>: احسب العنوان من غير ما تلمس الذاكرة <span class="tag">load effective address</span></h3>
+        <p><code>mov rax, [rbx+8]</code> = "روح للعنوان rbx+8 وهات اللي فيه". <code>lea rax, [rbx+8]</code> = "احسب rbx+8 وحطّه في rax" — <b>من غير أي وصول للذاكرة</b>. ولأن المعادلة <code>base + index×scale + disp</code> فيها جمع وضرب، الـ compilers بيستخدموا <code>lea</code> كآلة حاسبة سريعة:</p>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>المعنى</th></tr></thead>
+            <tbody>
+              <tr><td><code>lea rax, [rdi+rsi]</code></td><td><code>rax = a + b</code> (من غير ما يغيّر الـ flags ومن غير ما يبوّظ a أو b)</td></tr>
+              <tr><td><code>lea eax, [rdi+rdi*2]</code></td><td><code>eax = x * 3</code></td></tr>
+              <tr><td><code>lea eax, [rdi+rdi*4]</code></td><td><code>eax = x * 5</code></td></tr>
+              <tr><td><code>lea eax, [rdi*8+7]</code></td><td><code>eax = x*8 + 7</code></td></tr>
+              <tr><td><code>lea rcx, [rbp-40h]</code></td><td><code>rcx = &amp;local_buffer</code> (هتشوفها قبل أي call بياخد pointer لمتغير محلي)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <asm-lab id="s04-lab2" title="mov vs lea، والـ addressing modes على array" setup="rdi=3">
+section .data
+arr: dd 10, 20, 30, 40, 50     ; int arr[5]
+
+section .text
+demo:                       ; rdi = i = 3
+    lea rbx, [rel arr]      ; rbx = &arr[0]        (address)
+    mov eax, [rbx]          ; eax = arr[0] = 10    (memory read)
+    mov ecx, [rbx+8]        ; ecx = arr[2] = 30    (disp = 2*4)
+    mov edx, [rbx+rdi*4]    ; edx = arr[i] = arr[3] = 40
+    lea rsi, [rbx+rdi*4]    ; rsi = &arr[3]        (no read!)
+    lea r8, [rdi+rdi*4]     ; r8  = i*5 = 15       (lea as math)
+    lea r9, [rdi*8+7]       ; r9  = i*8+7 = 31
+    ret
+</asm-lab>
+        <div class="callout tip"><span class="ci">🎯</span><div><strong>مفيش memory ← memory</strong><p>x86 مبيسمحش بـ instruction فيها الاتنين memory: <code>mov [rax], [rbx]</code> غلط. لازم تعدّي على register: <code>mov rcx, [rbx]</code> ثم <code>mov [rax], rcx</code>. (الاستثناء الوحيد: الـ string instructions زي <code>movsb</code> — مرحلة 12.)</p></div></div>
+
+        <h3 class="sub">الـ Alignment <span class="tag">ليه offsets بتبقى مضاعفات 8</span></h3>
+        <p>الـ CPU أسرع لما قيمة حجمها N تكون في عنوان بيقبل القسمة على N (dword على 4، qword على 8). الـ compilers بيضيفوا <b>padding</b> في الـ structs عشان كده، والـ ABI بيطلب الـ stack يبقى aligned على <b>16</b> قبل أي <code>call</code> (هنشوف ليه في مرحلة الـ stack). وبعض الـ SSE instructions (زي <code>movaps</code>) بتعمل crash لو العنوان مش aligned على 16 — من أشهر أسباب الـ crashes لما تكتب Assembly بتنادي دوال C.</p>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 04</h3></div>
+
+          <quiz id="s04-q1" answer="1">
+            <q><code>rbx = 0x1000</code> و<code>rcx = 3</code>. العنوان اللي <code>[rbx+rcx*8+0x10]</code> بيشاور عليه؟</q>
+            <o><code>0x1013</code></o>
+            <o><code>0x1028</code></o>
+            <o><code>0x1038</code></o>
+            <o><code>0x1040</code></o>
+            <good>0x1000 + 3×8 + 0x10 = 0x1000 + 0x18 + 0x10 = <b>0x1028</b>. جرّبها في حاسبة العنوان فوق.</good>
+            <bad>3×8 = 24 = 0x18 (مش 0x24!). وبعدين زوّد 0x10.</bad>
+          </quiz>
+          <quiz id="s04-q2" answer="1">
+            <q>إيه الفرق بين <code>mov rax, [rbx]</code> و<code>lea rax, [rbx]</code>؟</q>
+            <o>مفيش فرق</o>
+            <o><code>mov</code> بتقرا الـ 8 bytes اللي عند العنوان، و<code>lea</code> بتحط العنوان نفسه (= rbx)</o>
+            <o><code>lea</code> أبطأ</o>
+            <o><code>lea</code> بتكتب في الذاكرة</o>
+            <good>lea = Load Effective Address: بتحسب العنوان بس. يعني <code>lea rax, [rbx]</code> = <code>mov rax, rbx</code>.</good>
+            <bad>واحدة فيهم مبتلمسش الذاكرة خالص.</bad>
+          </quiz>
+          <quiz id="s04-q3" answer="3">
+            <q>شفت <code>lea eax, [rcx+rcx*4]</code> ثم <code>add eax, eax</code>. ده بيحسب إيه بـ <code>x = ecx</code>؟</q>
+            <o><code>x + 4</code></o>
+            <o><code>x * 5</code></o>
+            <o><code>x * 8</code></o>
+            <o><code>x * 10</code></o>
+            <good>x + 4x = 5x، وبعدين ×2 = 10x. الـ compilers بيعملوا كده بدل <code>imul</code> عشان أسرع.</good>
+            <bad>احسب lea الأول (x + 4x)، وبعدين الـ add بتضاعف.</bad>
+          </quiz>
+          <quiz id="s04-q4" answer="0">
+            <q>الـ disassembly فيه <code>mov eax, dword ptr [rdi+rcx*4]</code> جوه loop بتزوّد rcx. أغلب الظن:</q>
+            <o>loop على array من <code>int</code> (4 bytes)، rdi = بداية الـ array، rcx = index</o>
+            <o>loop على string (chars)</o>
+            <o>array من pointers</o>
+            <o>قراية struct field</o>
+            <good>scale = 4 = حجم int، والـ index بيزيد ← arr[i].</good>
+            <bad>الـ scale بيقولك حجم العنصر.</bad>
+          </quiz>
+          <quiz id="s04-q5" answer="2">
+            <q>أنهي instruction غلط ومش هتتعمل assemble؟</q>
+            <o><code>mov eax, [rbx+rcx*4+8]</code></o>
+            <o><code>lea rax, [rax+rax*2]</code></o>
+            <o><code>mov [rax], [rbx]</code></o>
+            <o><code>mov dword [rsp+8], 0</code></o>
+            <good>memory ← memory مش مسموح في instruction واحدة.</good>
+            <bad>دوّر على الـ instruction اللي فيها الـ 2 operands في الذاكرة.</bad>
+          </quiz>
+          <quiz id="s04-q6" answer="1">
+            <q>process بيعمل <code>VirtualAlloc</code> بـ protection = <code>0x40</code>، يكتب فيها bytes، ويعمل <code>call</code> عليها. ده غالبًا:</q>
+            <o>تحميل DLL طبيعي</o>
+            <o>بيفك/بينفّذ shellcode أو payload — 0x40 = PAGE_EXECUTE_READWRITE</o>
+            <o>بيعمل allocate للـ stack</o>
+            <o>بيقرا ملف</o>
+            <good>RWX + كتابة + تنفيذ = النمط الكلاسيكي للـ loaders والـ shellcode runners. حط breakpoint على الـ call وdump الـ buffer.</good>
+            <bad>0x40 = PAGE_EXECUTE_READWRITE. ليه برنامج يحتاج ذاكرة writable وexecutable؟</bad>
+          </quiz>
+          <quiz id="s04-q7" answer="3">
+            <q>في x64، الـ instruction <code>mov rax, [rip+0x1000]</code> عند العنوان <code>0x401000</code> وطولها 7 bytes. بتقرا من؟</q>
+            <o><code>0x401000</code></o>
+            <o><code>0x402000</code></o>
+            <o><code>0x401007</code></o>
+            <o><code>0x402007</code></o>
+            <good>RIP أثناء التنفيذ = العنوان اللي بعد الـ instruction = 0x401007. + 0x1000 = 0x402007.</good>
+            <bad>RIP-relative بيتحسب من <b>نهاية</b> الـ instruction.</bad>
+          </quiz>
+          <quiz id="s04-q8" answer="0">
+            <q>حجم الـ page القياسي على x86-64؟</q>
+            <o>4 KB (<code>0x1000</code>)</o>
+            <o>512 byte</o>
+            <o>64 KB</o>
+            <o>1 MB</o>
+            <good>4096 byte. عشان كده العناوين الـ aligned على page بتنتهي بـ 3 أصفار hex (<code>0x401000</code>). (فيه كمان large pages: 2MB و1GB.)</good>
+            <bad>0x1000 بالـ decimal كام؟</bad>
+          </quiz>
+
+          <lab-challenge id="s04-lc1" title="arr[i] + arr[j]" level="1">
+            <desc><code>rdi</code> = عنوان array من <code>int</code> (4 bytes)، <code>rsi</code> = i، <code>rdx</code> = j. رجّع في <code>eax</code> قيمة <code>arr[i] + arr[j]</code>. استخدم الـ addressing modes (<code>[rdi+rsi*4]</code>).</desc>
+            <starter>
+pair_sum:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+pair_sum:
+    mov eax, [rdi+rsi*4]    ; arr[i]
+    add eax, [rdi+rdx*4]    ; + arr[j]
+    ret
+</solution>
+            <test setup="rdi=&amp;bytes(0a 00 00 00 14 00 00 00 1e 00 00 00 28 00 00 00);rsi=1;rdx=3" expect="eax=60" label="arr={10,20,30,40}, i=1, j=3"/>
+            <test setup="rdi=&amp;bytes(05 00 00 00 ff ff ff ff 07 00 00 00);rsi=0;rdx=1" expect="eax=4" label="arr={5,-1,7}, i=0, j=1"/>
+            <test setup="rdi=&amp;bytes(64 00 00 00);rsi=0;rdx=0" expect="eax=200" label="arr={100}, i=j=0"/>
+          </lab-challenge>
+          <lab-challenge id="s04-lc2" title="احسب x*9 + 4 من غير ضرب" level="2" forbid="imul,mul,shl,sal" maxins="2">
+            <desc>الـ input في <code>rdi</code>. رجّع <code>x*9 + 4</code> في <code>rax</code> بـ instruction <b>واحدة</b> (+ <code>ret</code>). ممنوع <code>imul</code>/<code>mul</code>/<code>shl</code>. (تلميح: <code>lea</code> ومعادلة الـ addressing.)</desc>
+            <starter>
+calc:
+    mov rax, rdi
+    ret
+</starter>
+            <solution>
+calc:
+    lea rax, [rdi+rdi*8+4]   ; x + 8x + 4
+    ret
+</solution>
+            <test setup="rdi=1" expect="rax=13"/>
+            <test setup="rdi=10" expect="rax=94"/>
+            <test setup="rdi=0" expect="rax=4"/>
+            <test setup="rdi=-1" expect="rax=-5"/>
+          </lab-challenge>
+
+          <re-task id="s04-re1" title="أنهي عنصر؟" level="2" answer="5" norm="int">
+            <desc>الدالة دي بتاخد pointer لـ struct في <code>rdi</code>. الـ struct فيه array من pointers (كل واحد 8 bytes) بتبدأ عند offset <code>0x18</code>. الدالة بترجع <code>s-&gt;ptrs[i]</code> — لأنهي <code>i</code>؟</desc>
+            <listing>
+get_item:
+    mov rax, [rdi+0x40]
+    ret
+</listing>
+            <hint>offset = 0x18 + i×8. حل المعادلة: 0x40 = 0x18 + 8i.</hint>
+            <explain><code>0x40 − 0x18 = 0x28 = 40</code>، و<code>40 / 8 = 5</code> ⇐ <code>s-&gt;ptrs[5]</code>. لما تشوف offsets ثابتة بالشكل ده في دوال كتير، ابدأ ابني الـ struct في IDA/Ghidra (Structures window) وسمّي كل field — هنعمل ده بالتفصيل في مرحلة الـ structs.</explain>
+          </re-task>
+        </div>
+      </section>

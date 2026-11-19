@@ -1,0 +1,221 @@
+      <section class="section" id="s24" data-part="الجزء 4 · الهندسة العكسية" data-nav="Anti-RE والـ Unpacking" data-icon="🛡️" data-keywords="anti-debug isdebuggerpresent beingdebugged ntglobalflag ntqueryinformationprocess debugport rdtsc timing int3 int 2d hardware breakpoints dr0 threadhidefromdebugger tls callback anti-vm cpuid hypervisor vmware virtualbox sandbox evasion obfuscation opaque predicate control flow flattening junk code mba vmprotect themida packer unpacking oep tail jump scylla scyllahide">
+        <div class="section-head">
+          <span class="section-index">24</span>
+          <div>
+            <p class="eyebrow">المرحلة الرابعة والعشرين · الـ malware بيقاوم</p>
+            <h2>Anti-Debug، Anti-VM، Obfuscation، وUnpacking</h2>
+            <p class="lede">الـ malware عارف إنك هتحلله. فبيكتشف الـ debugger والـ VM والـ sandbox، بيخلبط الكود عشان الـ disassembler يتوه، وبيتغلف بـ packer. كل حيلة منهم ليها <b>توقيع في الـ asm</b> وليها <b>حل</b>. المرحلة دي كتالوج للاتنين.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">Anti-Debug <span class="tag">ASM Explorer</span></h3>
+        <div class="explorer" data-scene="antidebug"></div>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>التقنية</th><th>هتشوف في الـ asm</th><th>الحل</th></tr></thead>
+            <tbody>
+              <tr><td>PEB.BeingDebugged</td><td><code>IsDebuggerPresent</code> أو <code>movzx eax, byte [gs:60h → +2]</code></td><td>ScyllaHide / صفّر الـ byte</td></tr>
+              <tr><td>NtGlobalFlag / Heap flags</td><td><code>[PEB+0BCh] &amp; 70h</code>، <code>[ProcessHeap+70h/74h]</code></td><td>ScyllaHide، أو attach بعد التشغيل</td></tr>
+              <tr><td>Debug port / object</td><td><code>NtQueryInformationProcess(h, 7 / 1Eh / 1Fh, …)</code>، <code>CheckRemoteDebuggerPresent</code></td><td>hook / عدّل القيمة الراجعة</td></tr>
+              <tr><td>Timing</td><td><code>rdtsc</code> مرتين وطرح، <code>GetTickCount</code>، <code>QueryPerformanceCounter</code> وقارن بـ threshold</td><td>متعملش step في الجزء ده — run لبعده، أو patch الـ cmp</td></tr>
+              <tr><td>Breakpoint scanning</td><td>loop بتدوّر على <code>0xCC</code> في الكود، أو checksum على <code>.text</code></td><td>hardware breakpoints بدل int3</td></tr>
+              <tr><td>Hardware BPs</td><td><code>GetThreadContext</code> ثم فحص <code>Dr0–Dr3</code></td><td>ScyllaHide (بيخفيهم)</td></tr>
+              <tr><td>Exceptions</td><td><code>int 2Dh</code>، <code>int3</code> + handler، <code>CloseHandle(0xDEADBEEF)</code>، <code>OutputDebugString</code></td><td>pass exceptions للبرنامج (Shift+F9)</td></tr>
+              <tr><td>Hide from debugger</td><td><code>NtSetInformationThread(h, 11h, 0, 0)</code> (ThreadHideFromDebugger)</td><td>NOP الـ call — وإلا الـ debugger يفقد الـ thread</td></tr>
+              <tr><td>Parent / windows / processes</td><td><code>FindWindowA("OLLYDBG")</code>، أسماء processes (<code>x64dbg.exe</code>، <code>procmon.exe</code>)، الـ parent مش explorer.exe</td><td>rename الأدوات، ScyllaHide</td></tr>
+              <tr><td>TLS callbacks</td><td>كود في <code>TLS directory</code> بيشتغل قبل الـ EP</td><td>«Break on TLS callbacks» في x64dbg</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub">Anti-VM وAnti-Sandbox</h3>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🧬</div><h4>الـ CPU نفسه</h4><p><code>cpuid</code> leaf 1 ← <code>ecx</code> bit 31 (hypervisor). leaf <code>0x40000000</code> ← vendor في ebx/ecx/edx: <code>"VMwareVMware"</code>، <code>"VBoxVBoxVBox"</code>، <code>"Microsoft Hv"</code>، <code>"KVMKVMKVM"</code>. وVMware backdoor: <code>in eax, dx</code> مع <code>eax = 'VMXh'</code> و<code>dx = 'VX'</code> (5658h).</p></div>
+          <div class="card reveal"><div class="ico">🧾</div><h4>آثار في النظام</h4><p>MAC بيبدأ بـ <code>00:0C:29</code>/<code>00:50:56</code> (VMware) أو <code>08:00:27</code> (VirtualBox)، processes (<code>vmtoolsd.exe</code>، <code>VBoxService.exe</code>)، registry keys، ملفات drivers، أسماء أجهزة.</p></div>
+          <div class="card reveal"><div class="ico">📉</div><h4>موارد قليلة = sandbox</h4><p>أقل من 2 CPU، RAM أقل من 4GB، disk صغير، uptime قصير، مفيش ملفات حديثة، مفيش حركة ماوس. هتشوف <code>GlobalMemoryStatusEx</code>، <code>GetSystemInfo</code>، <code>GetCursorPos</code> مرتين.</p></div>
+          <div class="card reveal"><div class="ico">⏳</div><h4>استنى الـ sandbox يزهق</h4><p><code>Sleep(600000)</code> (الـ sandboxes بتسرّع الـ Sleep — فبيقيس الوقت قبل وبعد بـ <code>rdtsc</code>/<code>GetTickCount</code> عشان يكتشف التسريع)، أو loops حسابية طويلة جدًا.</p></div>
+        </div>
+
+        <h3 class="sub">Obfuscation: الكود اللي اتعمل عشان يتوّهك</h3>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 330" role="img" aria-label="control flow flattening">
+            <defs><marker id="s24ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>
+            <text x="200" y="26" text-anchor="middle" class="d-tb">Original CFG</text>
+            <rect x="140" y="44" width="120" height="40" rx="8" class="d-box"/><text x="200" y="69" text-anchor="middle" class="d-t">A: x ^= 0x5A</text>
+            <rect x="140" y="114" width="120" height="40" rx="8" class="d-box"/><text x="200" y="139" text-anchor="middle" class="d-t">B: x += 7</text>
+            <rect x="140" y="184" width="120" height="40" rx="8" class="d-box"/><text x="200" y="209" text-anchor="middle" class="d-t">C: x *= 3</text>
+            <rect x="140" y="254" width="120" height="40" rx="8" class="d-box4"/><text x="200" y="279" text-anchor="middle" class="d-t">D: x == 501?</text>
+            <path d="M200 84V112M200 154V182M200 224V252" class="d-ar" marker-end="url(#s24ah)"/>
+            <line x1="400" y1="30" x2="400" y2="310" stroke="rgba(150,170,200,.18)" stroke-dasharray="4 5"/>
+            <text x="700" y="26" text-anchor="middle" class="d-tb">Flattened</text>
+            <rect x="610" y="130" width="180" height="60" rx="10" class="d-box3"/><text x="700" y="156" text-anchor="middle" class="d-tb">dispatcher</text><text x="700" y="176" text-anchor="middle" class="d-tx">switch (state)</text>
+            <rect x="450" y="44" width="130" height="44" rx="8" class="d-box"/><text x="515" y="64" text-anchor="middle" class="d-t">A</text><text x="515" y="80" text-anchor="middle" class="d-tx">state = 0x1B7</text>
+            <rect x="820" y="44" width="130" height="44" rx="8" class="d-box"/><text x="885" y="64" text-anchor="middle" class="d-t">B</text><text x="885" y="80" text-anchor="middle" class="d-tx">state = 0x9C4</text>
+            <rect x="450" y="232" width="130" height="44" rx="8" class="d-box"/><text x="515" y="252" text-anchor="middle" class="d-t">C</text><text x="515" y="268" text-anchor="middle" class="d-tx">state = 0x7A1</text>
+            <rect x="820" y="232" width="130" height="44" rx="8" class="d-box4"/><text x="885" y="252" text-anchor="middle" class="d-t">D</text><text x="885" y="268" text-anchor="middle" class="d-tx">return</text>
+            <path d="M610 150 C 590 120, 590 100, 582 72" class="d-ar-acc" marker-end="url(#s24ah)"/>
+            <path d="M580 80 C 620 110, 630 125, 640 128" class="d-ar d-dash" marker-end="url(#s24ah)"/>
+            <path d="M790 150 C 810 120, 815 100, 820 76" class="d-ar-acc" marker-end="url(#s24ah)"/>
+            <path d="M822 82 C 790 110, 780 122, 768 128" class="d-ar d-dash" marker-end="url(#s24ah)"/>
+            <path d="M620 190 C 600 215, 590 235, 582 248" class="d-ar-acc" marker-end="url(#s24ah)"/>
+            <path d="M580 244 C 620 215, 640 200, 650 192" class="d-ar d-dash" marker-end="url(#s24ah)"/>
+            <path d="M780 190 C 800 215, 812 232, 820 246" class="d-ar-acc" marker-end="url(#s24ah)"/>
+            <text x="700" y="318" text-anchor="middle" class="d-ts ar">كل block بيرجع للـ dispatcher — الترتيب الحقيقي مخفي في قيم الـ state</text>
+          </svg>
+          <figcaption><b>Control-flow flattening</b> (OLLVM وأمثاله): كل الـ blocks بقت «إخوات» تحت switch واحد، والـ graph بقى نجمة. الحل: تتبّع متغير الـ state — كل block بيكتب قيمة الـ state الجاية؛ رتّبهم وهترجّع الـ CFG الأصلي. (التحدي تحت بالظبط كده.)</figcaption>
+        </figure>
+        <div class="grid-3">
+          <div class="card reveal"><div class="ico">🎲</div><h4>Opaque predicates</h4><p>شرط نتيجته معروفة مسبقًا بس صعب على الأداة تثبتها: <code>x*(x+1)</code> دايمًا زوجي، <code>x² ≥ 0</code>… الفرع التاني = زبالة عمرها ما تتنفذ.</p></div>
+          <div class="card reveal"><div class="ico">🗑️</div><h4>Junk code + MBA</h4><p>instructions ملهاش تأثير (<code>push/pop</code>، <code>xchg</code> مرتين)، وتعبيرات Mixed Boolean-Arithmetic: <code>(x ^ y) + 2*(x &amp; y)</code> = <code>x + y</code>.</p></div>
+          <div class="card reveal"><div class="ico">🖥️</div><h4>Virtualization</h4><p>VMProtect/Themida بيحوّلوا الكود لـ bytecode لـ CPU وهمي، وinterpreter بيشغّله. هتشوف loop ضخمة فيها <code>movzx</code> لـ opcode وjump table. التحليل static هنا شبه مستحيل — اشتغل dynamic.</p></div>
+        </div>
+
+        <h3 class="sub">Unpacking <span class="tag">ASM Explorer</span></h3>
+        <div class="explorer" data-scene="unpack"></div>
+        <div class="callout tip"><span class="ci">💡</span><div><strong>وصفة الـ unpacking العامة</strong><p>(1) DIE: أي packer؟ لو UPX عادي ← <code>upx -d</code>. (2) breakpoints على <code>VirtualAlloc</code>/<code>VirtualProtect</code>/<code>WriteProcessMemory</code>/<code>CreateProcessInternalW</code> — كتير من الـ packers بيفكوا payload في ذاكرة جديدة أو process جديد. (3) لما الـ protection تتغير لـ executable أو تلاقي <code>MZ</code> في buffer جديد ← dump الـ buffer. (4) لو بيفك في نفسه: دوّر على الـ tail jump (أو ESP trick) ← OEP ← Scylla. (5) أدوات أوتوماتيك (unpac.me، mal_unpack) بتوفر وقت.</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 24</h3></div>
+
+          <quiz id="s24-q1" answer="1">
+            <q>جوه الـ debugger الـ sample بيطلع رسالة «Update failed» ويقفل، وفي الـ sandbox بيعمل اتصالات network. أول احتمال؟</q>
+            <o>الـ sample بايظ</o>
+            <o>anti-debug بيوديه لمسار مزيف لما يحس بالـ debugger</o>
+            <o>الـ network مقفولة</o>
+            <o>محتاج admin</o>
+            <good>سلوك مختلف تحت الـ debugger = anti-debug. دوّر على الـ checks (أو شغّل ScyllaHide) قبل ما تحكم.</good>
+            <bad>ليه السلوك اختلف؟</bad>
+          </quiz>
+          <quiz id="s24-q2" answer="3">
+            <q><code>rdtsc</code> / <code>mov esi, eax</code> / … كود قصير … / <code>rdtsc</code> / <code>sub eax, esi</code> / <code>cmp eax, 1000h</code> / <code>ja kill</code>. ده:</q>
+            <o>توليد رقم عشوائي</o>
+            <o>قياس أداء عادي</o>
+            <o>anti-VM بالـ cpuid</o>
+            <o>timing check: لو الكود ده خد cycles كتير (عشان بتعمل single-step) ← debugger</o>
+            <good>الحل: متعملش step جوه المنطقة دي (breakpoint بعدها وRun)، أو patch الـ ja.</good>
+            <bad>الفرق بين قراءتين للـ timestamp counter…</bad>
+          </quiz>
+          <quiz id="s24-q3" answer="0">
+            <q>بعد <code>mov eax, 40000000h</code> / <code>cpuid</code>، الـ sample بيقارن <code>ebx</code> بـ <code>61774D56h</code>. بيدوّر على:</q>
+            <o>VMware — <code>"VMwa"</code> (أول 4 حروف من <code>"VMwareVMware"</code>)</o>
+            <o>Intel</o>
+            <o>Hyper-V</o>
+            <o>debugger</o>
+            <good>0x61774D56 little-endian = 56 4D 77 61 = "VMwa".</good>
+            <bad>حوّل الـ dword لحروف (little-endian).</bad>
+          </quiz>
+          <quiz id="s24-q4" answer="2">
+            <q>IDA بيعرض function شكلها نجمة: block واحد في النص فيه <code>switch</code> على متغير، وكل الـ blocks بتكتب في المتغير ده وترجع له. ده:</q>
+            <o>jump table عادي</o>
+            <o>VM protector</o>
+            <o>control-flow flattening — تتبّع قيم متغير الـ state عشان ترتّب الـ blocks</o>
+            <o>exception handler</o>
+            <good>VM protector بيبان شبهه بس فيه bytecode بيتقرا؛ الـ flattening الـ blocks نفسها كود x86 أصلي.</good>
+            <bad>شوف الـ diagram.</bad>
+          </quiz>
+
+          <lab-challenge id="s24-lc1" title="is_debugged من الـ PEB" level="2">
+            <desc><code>rdi</code> = pointer لـ PEB (x64). رجّع <code>eax = 1</code> لو <code>BeingDebugged</code> (byte عند <code>+0x02</code>) ≠ 0 <b>أو</b> <code>NtGlobalFlag</code> (dword عند <code>+0xBC</code>) فيه أي bit من <code>0x70</code>. وإلا <code>0</code>. (ده اللي الـ malware بيعمله inline — واللي ScyllaHide بيصفّره.)</desc>
+            <starter>
+is_debugged:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+is_debugged:
+    movzx eax, byte [rdi+2]         ; PEB.BeingDebugged
+    mov ecx, [rdi+0xBC]             ; PEB.NtGlobalFlag
+    and ecx, 0x70                   ; FLG_HEAP_ENABLE_TAIL_CHECK | FREE_CHECK | VALIDATE_PARAMETERS
+    or eax, ecx
+    setnz al
+    movzx eax, al
+    ret
+</solution>
+            <test setup="rdi=&bytes(00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00)" expect="eax=0" label="clean PEB"/>
+            <test setup="rdi=&bytes(00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00)" expect="eax=1" label="BeingDebugged = 1"/>
+            <test setup="rdi=&bytes(00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 70 00 00 00)" expect="eax=1" label="NtGlobalFlag = 0x70"/>
+            <test setup="rdi=&bytes(00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 00 00)" expect="eax=0" label="unrelated NtGlobalFlag bit"/>
+            <test setup="rdi=&bytes(00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 70 00 00 00)" expect="eax=1" label="both"/>
+          </lab-challenge>
+
+          <lab-challenge id="s24-lc2" title="is_vm بالـ cpuid (واحمي rbx!)" level="2">
+            <desc>نفّذ <code>cpuid</code> بـ <code>eax = 1</code> ورجّع <code>bit 31</code> من <code>ecx</code> (الـ hypervisor bit) في <code>eax</code> (0 أو 1). <b>انتبه</b>: <code>cpuid</code> بيكتب في <code>ebx</code>، و<code>rbx</code> callee-saved — الاختبارات بتتأكد إنه رجع زي ما كان.</desc>
+            <starter>
+is_vm:
+    mov eax, 1
+    cpuid
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+is_vm:
+    push rbx                        ; cpuid clobbers ebx - and rbx is callee-saved
+    mov eax, 1
+    cpuid
+    mov eax, ecx
+    shr eax, 31                     ; hypervisor-present bit
+    pop rbx
+    ret
+</solution>
+            <test setup="vm=1;rbx=0x1234" expect="eax=1;rbx=0x1234" label="inside a VM"/>
+            <test setup="vm=0;rbx=0x5555" expect="eax=0;rbx=0x5555" label="bare metal"/>
+          </lab-challenge>
+
+          <re-task id="s24-re1" title="فك الـ flattening" level="3" answer="250" norm="int" entry="check">
+            <desc>الدالة دي flattened. أنهي قيمة لـ <code>edi</code> بترجّع <code>1</code>؟ (تتبّع الـ state: كل block بيقولك مين اللي بعده.)</desc>
+            <listing>
+check:
+    mov eax, edi
+    mov ecx, 0x3E2          ; initial state
+.dispatch:
+    cmp ecx, 0x3E2
+    je .s_xor
+    cmp ecx, 0x1B7
+    je .s_add
+    cmp ecx, 0x9C4
+    je .s_mul
+    cmp ecx, 0x7A1
+    je .s_cmp
+    xor eax, eax
+    ret
+.s_add:
+    add eax, 7
+    mov ecx, 0x9C4
+    jmp .dispatch
+.s_cmp:
+    cmp eax, 0x1F5
+    sete al
+    movzx eax, al
+    ret
+.s_xor:
+    xor eax, 0x5A
+    mov ecx, 0x1B7
+    jmp .dispatch
+.s_mul:
+    lea eax, [rax+rax*2]
+    mov ecx, 0x7A1
+    jmp .dispatch
+</listing>
+            <verify setup="rdi={ans}" expect="eax=1"/>
+            <hint>الترتيب: 0x3E2 (xor) ← 0x1B7 (add) ← 0x9C4 (mul) ← 0x7A1 (cmp). اعكس العمليات من 0x1F5.</hint>
+            <explain>((x ^ 0x5A) + 7) × 3 = 0x1F5 = 501 ← +7 = 167 ← x ^ 0x5A = 160 = 0xA0 ← x = 0xFA = <b>250</b>. (وجرّبها في المعمل 🔬 بـ rdi=250.)</explain>
+          </re-task>
+          <re-task id="s24-re2" title="Opaque predicate" level="2" answer="0" norm="int">
+            <desc>كام input (من الـ 2³² قيمة) بيوصل لـ <code>.fake</code>؟</desc>
+            <listing>
+gate:
+    mov eax, edi
+    lea ecx, [rax+1]
+    imul eax, ecx           ; x * (x + 1)
+    test al, 1
+    jnz .fake               ; odd?
+    mov eax, 1
+    ret
+.fake:
+    ud2                     ; junk the disassembler has to deal with
+</listing>
+            <hint>x و x+1 واحد منهم زوجي دايمًا.</hint>
+            <explain><b>0</b>: حاصل ضرب أي رقمين متتاليين زوجي (وده بيفضل صح حتى مع الـ overflow في 32-bit لأن أقل bit مبيتأثرش). الفرع <code>.fake</code> كود ميت اتحط عشان يلخبط الـ graph والـ decompiler — في IDA ممكن تعمل patch للـ jnz لـ NOP عشان الـ decompiler يشيله.</explain>
+          </re-task>
+        </div>
+      </section>

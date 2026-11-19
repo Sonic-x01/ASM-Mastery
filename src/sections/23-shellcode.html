@@ -1,0 +1,201 @@
+      <section class="section" id="s23" data-part="الجزء 4 · الهندسة العكسية" data-nav="Shellcode" data-icon="💉" data-keywords="shellcode position independent null free jmp call pop getpc decoder stub xor encoder msfvenom egg hunter loader mmap virtualalloc process injection createremotethread apc hollowing scdbg speakeasy blobrunner cyberchef cobalt strike metasploit block_api">
+        <div class="section-head">
+          <span class="section-index">23</span>
+          <div>
+            <p class="eyebrow">المرحلة الثالثة والعشرين · كود من غير بيت</p>
+            <h2>Shellcode: كتابته، تحميله، وتحليله</h2>
+            <p class="lede">الـ shellcode = machine code مستقل: مالوش headers ولا imports ولا عنوان ثابت، بيتحط في أي حتة في الذاكرة ويشتغل. بتلاقيه في الـ exploits، الـ macros، الـ loaders، الـ beacons (Cobalt Strike)، وفي الـ memory dumps. هتكتب واحد حقيقي، تشغّله بـ loader، تشفّره، وبعدين تتعلم تحلل اللي بتلاقيه.</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">📍</div><h4>Position-independent</h4><p>مفيش عناوين مطلقة: كل حاجة نسبية (<code>[rip+x]</code>، الـ stack، أو GetPC). لازم يشتغل سواء اتحط في <code>0x1F0000</code> أو <code>0x7FF6…</code>.</p></div>
+          <div class="card reveal"><div class="ico">🚫</div><h4>من غير imports</h4><p>بيلاقي الـ APIs بنفسه: PEB walk ← export table ← hash (المرحلة 22). على Linux أسهل: <code>syscall</code> مباشرة.</p></div>
+          <div class="card reveal"><div class="ico">0️⃣</div><h4>من غير null bytes (غالبًا)</h4><p>لو هيعدّي من <code>strcpy</code> أو string في exploit، أي <code>00</code> هيقطعه. فبيستخدم <code>xor eax, eax</code>، <code>push imm8 / pop</code>، وregisters صغيرة بدل <code>mov eax, 1</code> (<code>B8 01 00 00 00</code>).</p></div>
+          <div class="card reveal"><div class="ico">🪶</div><h4>صغير وstaged</h4><p><b>stager</b> صغير (مئات الـ bytes) بيحمّل <b>stage</b> كبير من الشبكة ويحطه في الذاكرة. الـ stage ممكن يبقى DLL كامل بيتحمّل reflectively.</p></div>
+        </div>
+
+        <h3 class="sub">أول shellcode ليك (Linux x64، null-free)</h3>
+        <nasm-example file="sc_hello.asm" expect="pwned by asm :)\n">
+; 42 bytes, no 0x00 anywhere - press "Bytes" and check
+global _start
+_start:
+    mov rax, 0x0A293A206D736120     ; " asm :)\n"   (pushed first = higher address)
+    push rax
+    mov rax, 0x79622064656E7770     ; "pwned by"
+    push rax                        ; rsp -> "pwned by asm :)\n"  (string on the stack)
+    push 1
+    pop rax                         ; rax = 1 (write)   6A 01 58  instead of  B8 01 00 00 00
+    mov edi, eax                    ; fd = 1
+    mov rsi, rsp                    ; buf = the stack
+    push 16
+    pop rdx                         ; len = 16
+    syscall
+    push 60
+    pop rax                         ; exit
+    xor edi, edi
+    syscall
+</nasm-example>
+        <p>الـ string اتبنت على الـ stack بـ 2 <code>mov rax, imm64</code> + <code>push</code> (نفس فكرة الـ stack strings في المرحلة 16) — مفيش <code>.data</code> ولا عنوان ثابت. وده الـ <b>loader</b>: برنامج C بياخد الـ 42 byte دول ويشغّلهم:</p>
+        <c-example file="sc_loader.c">
+#include <stdio.h>
+#include <string.h>
+#include <sys/mman.h>
+
+/* the 42 bytes produced by sc_hello.asm */
+unsigned char sc[] = {
+    0x48, 0xB8, 0x20, 0x61, 0x73, 0x6D, 0x20, 0x3A, 0x29, 0x0A, 0x50, 0x48, 0xB8, 0x70,
+    0x77, 0x6E, 0x65, 0x64, 0x20, 0x62, 0x79, 0x50, 0x6A, 0x01, 0x58, 0x89, 0xC7, 0x48,
+    0x89, 0xE6, 0x6A, 0x10, 0x5A, 0x0F, 0x05, 0x6A, 0x3C, 0x58, 0x31, 0xFF, 0x0F, 0x05
+};
+
+int main(void) {
+    printf("[loader] %zu bytes, contains 0x00: %s\n", sizeof sc, memchr(sc, 0, sizeof sc) ? "yes" : "no");
+    void *mem = mmap(NULL, sizeof sc, PROT_READ | PROT_WRITE | PROT_EXEC,   /* RWX - the classic red flag */
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mem == MAP_FAILED) { perror("mmap"); return 1; }
+    memcpy(mem, sc, sizeof sc);
+    puts("[loader] jumping into the shellcode...");
+    fflush(stdout);                    /* the shellcode exits with a raw syscall: flush first */
+    ((void (*)(void))mem)();           /* never returns */
+    return 0;
+}
+        </c-example>
+        <div class="callout info"><span class="ci">🪟</span><div><strong>نفس الـ loader على Windows</strong><p><code>VirtualAlloc(NULL, len, 0x3000, 0x40)</code> ← <code>memcpy</code> (أو <code>RtlMoveMemory</code>) ← <code>((void(*)())p)()</code> أو <code>CreateThread(…, p, …)</code> + <code>WaitForSingleObject(h, INFINITE)</code>. الأذكى: RW ثم <code>VirtualProtect</code> لـ RX. وأي حاجة من دول في sample = <b>shellcode loader</b> — الـ payload الحقيقي هو الـ buffer اللي بيتنسخ: اعمل breakpoint على الـ call واعمل dump له.</p></div></div>
+
+        <h3 class="sub">Decoder stub: shellcode بيفك نفسه <span class="tag">ASM Explorer</span></h3>
+        <div class="explorer" data-scene="decoder"></div>
+        <nasm-example file="sc_decoder.asm" expect="pwned by asm :)\n">
+; the same payload, XOR-encoded with 0xAA, behind a null-free decoder stub
+section .shell progbits alloc exec write align=16    ; RWX: the stub rewrites its own bytes
+global _start
+_start:
+    jmp short get_payload
+decoder:
+    pop rsi                         ; rsi = address of payload (GetPC)
+    push 42
+    pop rcx                         ; rcx = length, no 0x00 bytes
+.l: xor byte [rsi+rcx-1], 0xAA      ; decode in place, last byte first
+    loop .l
+    jmp rsi                         ; run the decoded shellcode
+get_payload:
+    call decoder                    ; pushes the address of the next byte = payload
+payload:
+    db 0xE2, 0x12, 0x8A, 0xCB, 0xD9, 0xC7, 0x8A, 0x90, 0x83, 0xA0, 0xFA, 0xE2, 0x12, 0xDA
+    db 0xDD, 0xC4, 0xCF, 0xCE, 0x8A, 0xC8, 0xD3, 0xFA, 0xC0, 0xAB, 0xF2, 0x23, 0x6D, 0xE2
+    db 0x23, 0x4C, 0xC0, 0xBA, 0xF0, 0xA5, 0xAF, 0xC0, 0x96, 0xF2, 0x9B, 0x55, 0xA5, 0xAF
+</nasm-example>
+        <p>(الـ linker هيطلع تحذير «LOAD segment with RWX permissions» — وده بالظبط الـ indicator اللي الأدوات بتدوّر عليه. الـ strings مش هتلاقي <code>pwned</code> في الملف ده خالص.)</p>
+
+        <h3 class="sub">Process Injection <span class="tag">ASM Explorer</span></h3>
+        <div class="explorer" data-scene="inject"></div>
+
+        <h3 class="sub">تحليل shellcode لقيته</h3>
+        <div class="steps">
+          <div class="step"><span class="n">1</span><div><h4>Carve</h4><p>من الـ document (macro، OLE)، الـ PowerShell (base64)، الـ loader (breakpoint على VirtualAlloc/memcpy)، أو memory dump (مناطق RWX / private executable — <b>malfind</b> في Volatility).</p></div></div>
+          <div class="step"><span class="n">2</span><div><h4>Identify</h4><p>32 ولا 64؟ فين نقطة البداية؟ دوّر على التوقيعات تحت (GetPC، PEB access، الـ prologue المشهور). CyberChef «Disassemble x86» لنظرة سريعة.</p></div></div>
+          <div class="step"><span class="n">3</span><div><h4>Emulate</h4><p><b>speakeasy</b> (Mandiant) و<b>scdbg</b> بيشغّلوا الـ shellcode في بيئة مزيفة ويطبعوا كل API اتنادت بالـ args — في دقيقة بتعرف الـ C2 والـ URLs.</p></div></div>
+          <div class="step"><span class="n">4</span><div><h4>Debug / Disassemble</h4><p><b>BlobRunner</b> أو <b>shellcode2exe</b> ← x64dbg. أو IDA/Ghidra: load كـ binary خام بالمعمارية الصح وابدأ من offset 0 (<kbd>C</kbd>).</p></div></div>
+        </div>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Bytes</th><th>المعنى</th><th>غالبًا</th></tr></thead>
+            <tbody>
+              <tr><td><code>FC 48 83 E4 F0 E8 C0 00 00 00</code></td><td><code>cld / and rsp, -16 / call …</code></td><td>Metasploit / Cobalt Strike x64 (block_api)</td></tr>
+              <tr><td><code>FC E8 ?? 00 00 00 60 89 E5</code></td><td><code>cld / call … / pushad / mov ebp, esp</code></td><td>Metasploit x86</td></tr>
+              <tr><td><code>65 48 8B ?? 60</code> · <code>64 8B ?? 30</code></td><td><code>mov reg, gs:[60h]</code> · <code>mov reg, fs:[30h]</code></td><td>PEB access = API resolving</td></tr>
+              <tr><td><code>E8 00 00 00 00</code> + <code>58–5F</code></td><td>call $+5 / pop reg</td><td>GetPC</td></tr>
+              <tr><td><code>D9 74 24 F4</code></td><td><code>fnstenv [esp-0Ch]</code></td><td>shikata_ga_nai GetPC</td></tr>
+              <tr><td><code>EB ?? … E8 F?FF FF FF</code></td><td>jmp-call-pop</td><td>decoder stub</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 23</h3></div>
+
+          <quiz id="s23-q1" answer="2">
+            <q>ليه الـ shellcode بيكتب <code>push 60 / pop rax</code> بدل <code>mov eax, 60</code>؟</q>
+            <o>أسرع</o>
+            <o>أصغر بـ 10 bytes</o>
+            <o><code>mov eax, 60</code> = <code>B8 3C 00 00 00</code> فيها 3 null bytes — <code>6A 3C 58</code> مفيهاش</o>
+            <o>عشان rax 64-bit</o>
+            <good>الـ null bytes بتقطع الـ shellcode لو اتعدّى كـ C string. push imm8 + pop = 3 bytes ونضيفة.</good>
+            <bad>اكتب الـ bytes بتاعة الاتنين.</bad>
+          </quiz>
+          <quiz id="s23-q2" answer="0">
+            <q>في الـ jmp-call-pop، بعد <code>call decoder</code> و<code>pop rsi</code>، الـ <code>rsi</code> بيشاور على:</q>
+            <o>أول byte بعد الـ call = الـ payload المشفر</o>
+            <o>بداية الـ decoder</o>
+            <o>الـ stack</o>
+            <o>نهاية الـ payload</o>
+            <good>الـ call حطت «عنوان الرجوع» = اللي بعدها مباشرة، وده مش كود: ده الـ payload.</good>
+            <bad>call بتعمل push لإيه؟</bad>
+          </quiz>
+          <quiz id="s23-q3" answer="3">
+            <q>loader بيعمل <code>VirtualAlloc</code> (RW)، ثم XOR loop على buffer، ثم <code>VirtualProtect(p, len, 0x20, …)</code>، ثم <code>call rax</code>. أسرع طريقة تجيب الـ payload المفكوك؟</q>
+            <o>تفك الـ XOR بإيدك</o>
+            <o>breakpoint على VirtualAlloc</o>
+            <o>تدوّر على strings</o>
+            <o>breakpoint على <code>VirtualProtect</code> (أو على الـ <code>call rax</code>) وdump للـ buffer — هو اتفك خلاص</o>
+            <good>خلّي الـ malware يعمل الشغل. الـ VirtualProtect لـ RX (0x20) = «الكود جاهز للتشغيل».</good>
+            <bad>استنى لحد ما يتفك.</bad>
+          </quiz>
+          <quiz id="s23-q4" answer="1">
+            <q>EDR شاف: <code>VirtualAllocEx</code> + <code>WriteProcessMemory</code> + <code>CreateRemoteThread</code> من process لـ explorer.exe. ده:</q>
+            <o>تحديث Windows</o>
+            <o>classic remote process injection</o>
+            <o>DLL side-loading</o>
+            <o>persistence</o>
+            <good>التلاتة دول بالترتيب = التوقيع الأشهر. البدائل: QueueUserAPC، SetThreadContext، hollowing…</good>
+            <bad>شوف مشهد الـ injection.</bad>
+          </quiz>
+
+          <lab-challenge id="s23-lc1" title="Egg hunter" level="3">
+            <desc>الـ stager أحيانًا مايعرفش الـ payload الكبير اتحط فين في الذاكرة — فبيدوّر على <b>علامة</b> (egg) قبله: الـ 8 bytes <code>"w00tw00t"</code>. اكتب <code>egg_hunt</code>: <code>rdi</code> = بداية المنطقة، <code>rsi</code> = طولها. رجّع في <code>rax</code> عنوان أول byte <b>بعد</b> الـ egg، أو <code>0</code> لو مش موجود. (تلميح: الـ egg كـ qword little-endian = <code>0x7430307774303077</code>، وآخر مكان ممكن يبدأ فيه = <code>rdi + rsi − 8</code>.)</desc>
+            <starter>
+egg_hunt:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+egg_hunt:
+    mov rax, 0x7430307774303077     ; "w00tw00t"
+    lea rdx, [rdi+rsi-8]            ; last possible start
+.scan:
+    cmp rdi, rdx
+    ja .none
+    cmp [rdi], rax                  ; compare 8 bytes at once
+    je .found
+    inc rdi
+    jmp .scan
+.found:
+    lea rax, [rdi+8]                ; payload starts right after the egg
+    ret
+.none:
+    xor eax, eax
+    ret
+</solution>
+            <test setup="rdi=&bytes(ed c8 f3 4b e5 d5 16 05 98 4f 6d 62 88 5c 22 ba 32 45 72 04 77 30 30 74 77 30 30 74 cc c3 90 90);rsi=32" expect="rax=0x50001c" label="egg at +20"/>
+            <test setup="rdi=&bytes(77 30 30 74 77 30 30 74 48 31 c0 c3);rsi=12" expect="rax=0x500008" label="egg at the start"/>
+            <test setup="rdi=&bytes(39 9f 75 e7 07 1c 16 fc b6 80 77 30 30 74 77 30 30 41 41 41 41 41 41);rsi=23" expect="rax=0x0" label="w00tw00 + A (no egg)"/>
+            <test setup="rdi=&bytes(90 90 90 90 90 90 90 90 90 90 90 90 90 77 30 30 74 77 30 30 74);rsi=21" expect="rax=0x500015" label="egg at the very end"/>
+          </lab-challenge>
+
+          <re-task id="s23-re1" title="الـ syscall ده إيه؟" level="1" answer="execve" norm="text">
+            <desc>shellcode Linux x64 بيخلص بـ: <code>6A 3B</code> / <code>58</code> / <code>99</code> / <code>0F 05</code>. أنهي syscall؟ (اكتب اسمها)</desc>
+            <hint>push 0x3B / pop rax / cdq / syscall. الـ 59 في جدول Linux x64…</hint>
+            <explain>rax = 0x3B = 59 = <b>execve</b> (و<code>cdq</code> = rdx = 0 = envp NULL). غالبًا <code>execve("/bin//sh", …)</code> — الـ <code>//</code> عشان الـ string تبقى 8 bytes بالظبط.</explain>
+          </re-task>
+          <re-task id="s23-re2" title="أول byte بعد الفك" level="1" answer="0x48|72" norm="hex">
+            <desc>decoder بيعمل <code>xor byte [rsi+rcx-1], 5Ah</code>، وأول byte في الـ payload المشفر <code>0x12</code>. قيمته بعد الفك؟</desc>
+            <hint>0x12 ^ 0x5A.</hint>
+            <explain>0x12 ^ 0x5A = <b>0x48</b> = REX.W — بداية منطقية لـ shellcode x64 (<code>48 …</code>). لو المفتاح اللي جربته طلّع bytes «منطقية» زي 48/4C/E8/FC يبقى غالبًا صح.</explain>
+          </re-task>
+          <re-task id="s23-re3" title="beacon prologue" level="2" answer="PEB" norm="text">
+            <desc>buffer في memory dump بيبدأ بـ: <code>FC 48 83 E4 F0 E8 C0 00 00 00 41 51 41 50 52 51 56 48 31 D2 65 48 8B 52 60</code>. آخر instruction (<code>65 48 8B 52 60</code>) بتقرا أنهي structure؟</desc>
+            <hint>65 = gs prefix، و rdx = 0 من الـ xor اللي قبلها.</hint>
+            <explain><code>mov rdx, gs:[rdx+60h]</code> مع rdx = 0 ← <b>PEB</b>. ده الـ block_api بتاع Metasploit/Cobalt Strike x64: هيمشي على الـ Ldr ويحسب ROR13 hashes للـ modules والـ exports (المرحلة 8 و22).</explain>
+          </re-task>
+        </div>
+      </section>

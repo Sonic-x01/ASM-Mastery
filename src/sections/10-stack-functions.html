@@ -1,0 +1,348 @@
+      <section class="section" id="s10" data-part="الجزء 2 · الـ Instructions بالتفصيل" data-nav="الـ Stack والدوال" data-icon="📚" data-keywords="stack push pop call ret return address stack frame prologue epilogue rbp rsp leave local variables red zone alignment recursion frame pointer omission buffer overflow canary security cookie gs">
+        <div class="section-head">
+          <span class="section-index">10</span>
+          <div>
+            <p class="eyebrow">المرحلة العاشرة · قلب كل البرامج… وكل الـ exploits</p>
+            <h2>الـ Stack والدوال: call وret والـ frames</h2>
+            <p class="lede">الـ stack هو اللي بيخلي الدوال ممكنة: بيفتكر "أرجع فين"، وبيشيل المتغيرات المحلية، والـ registers المحفوظة. وفي نفس الوقت هو أشهر هدف للهجوم: لو قدرت تكتب على عنوان الرجوع، بقيت بتتحكم في RIP. المرحلة دي أساس كل الـ debugging وكل الـ exploitation.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الـ Stack: منطقة بتكبر لتحت <span class="tag">LIFO</span></h3>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">⬇️</div><h4>بيكبر ناحية العناوين الأصغر</h4><p><code>RSP</code> بيشاور على <b>آخر قيمة اتحطت</b> (قمة الـ stack). <code>push</code> بتنقّص <code>RSP</code> بـ 8 وتكتب، و<code>pop</code> بتقرا وتزوّد <code>RSP</code> بـ 8. "فوق" الـ stack = عناوين أصغر — عكس الحدس، فارسمه دايمًا بالعناوين الكبيرة تحت.</p></div>
+          <div class="card reveal"><div class="ico">♻️</div><h4>مفيش مسح</h4><p>الـ <code>pop</code> مبتمسحش القيمة — بس <code>RSP</code> بيتحرك. القيمة لسه في الذاكرة "تحت RSP" وهتتكتب فوقها في أول push. عشان كده ممكن تلاقي بيانات حساسة (keys، passwords) لسه موجودة في ذاكرة الـ stack بعد ما الدالة خلصت — كنز في الـ memory forensics.</p></div>
+        </div>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>بالظبط بتعمل</th></tr></thead>
+            <tbody>
+              <tr><td><code>push src</code></td><td><code>rsp = rsp − 8</code> ثم <code>[rsp] = src</code></td></tr>
+              <tr><td><code>pop dst</code></td><td><code>dst = [rsp]</code> ثم <code>rsp = rsp + 8</code></td></tr>
+              <tr><td><code>call target</code></td><td><code>push</code> (عنوان الـ instruction اللي بعدها) ثم <code>jmp target</code></td></tr>
+              <tr><td><code>ret</code></td><td><code>pop rip</code></td></tr>
+              <tr><td><code>ret 16</code></td><td><code>pop rip</code> ثم <code>rsp += 16</code> (stdcall في 32-bit)</td></tr>
+              <tr><td><code>leave</code></td><td><code>mov rsp, rbp</code> ثم <code>pop rbp</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub">call وret متحركين <span class="tag">🎬 scene</span></h3>
+        <p>شوف عنوان الرجوع وهو بيتحط على الـ stack ويرجع — ده "الخيط" اللي بيربط كل دالة بالـ caller بتاعها:</p>
+        <div class="explorer" data-scene="callret"></div>
+        <p>ونفس الكود في المعمل الحقيقي — راقب لوحة الـ Stack: لما تعمل <kbd>F7</kbd> على الـ <code>call</code> هتظهر قيمة جديدة مكتوب جنبها <code>↩ main+…</code>:</p>
+        <asm-lab id="s10-lab1" title="call وret في المعمل">
+main:
+    mov edi, 5
+    call square         ; push return address, jump
+    add eax, 1          ; we come back here
+    ret
+square:
+    mov eax, edi
+    imul eax, edi
+    ret                 ; pop return address -> rip
+</asm-lab>
+
+        <h3 class="sub">الـ Stack Frame <span class="tag">prologue · locals · epilogue</span></h3>
+        <p>كل دالة (في الكود غير المحسّن على الأقل) بتبني frame بنفس الشكل. لو حفظت الصورة دي، هتقرا أي <code>[rbp−x]</code> و<code>[rbp+x]</code> فورًا:</p>
+        <div class="mem">
+          <div class="mem-title">frame لدالة على x64 (rbp-based) — العناوين الكبيرة تحت</div>
+          <div class="mem-row"><span class="addr">rsp →</span><span class="val">…</span><span class="what">مساحة لـ arguments الدوال اللي هتتنادى (outgoing)</span></div>
+          <div class="mem-row hl"><span class="addr">rbp − 16</span><span class="val">local 2</span><span class="what">متغيرات محلية / buffers</span></div>
+          <div class="mem-row hl"><span class="addr">rbp − 8</span><span class="val">local 1 / canary</span><span class="what">الـ canary بيتحط هنا بين الـ buffers وrbp</span></div>
+          <div class="mem-row vio"><span class="addr">rbp</span><span class="val">saved rbp</span><span class="what">rbp بتاع الـ caller (push rbp)</span></div>
+          <div class="mem-row ret"><span class="addr">rbp + 8</span><span class="val">return address</span><span class="what">اللي الـ call حطته — هدف الـ overflow</span></div>
+          <div class="mem-row"><span class="addr">rbp + 16</span><span class="val">…</span><span class="what">frame الـ caller (أو args على الـ stack في 32-bit / الـ shadow space في Win64)</span></div>
+        </div>
+        <div class="explorer" data-scene="frame"></div>
+        <p>وده الكود الحقيقي من gcc لنفس النوع من الدوال — لاحظ الحاجات اللي الـ compiler عملها فعلًا:</p>
+        <compiled file="frames.c" targets="gcc-O0,gcc-O2" graph note="<b>leaf في -O0</b>: مفيش <code>sub rsp</code> خالص وبيكتب في <code>[rbp-20]</code> — ده الـ <b>red zone</b>: على Linux x64 الـ 128 byte اللي تحت RSP مضمونة للدالة اللي مبتنادليش حد (Windows مفيهوش red zone). <b>leaf في -O2</b>: اختصر كل الحسابات لـ <code>lea eax, [3+rdi*4]</code> (2a + 2a + 3). <b>fact في -O0</b>: recursion حقيقية بـ <code>call fact</code> وحافظ على n في <code>[rbp-8]</code>؛ وفي <b>-O2</b> حوّلها لـ loop!">
+int leaf(int a) {
+    int x = a * 2;
+    int y = x + 3;
+    return x + y;
+}
+
+long fact(long n) {
+    if (n <= 1)
+        return 1;
+    return n * fact(n - 1);
+}
+</compiled>
+        <div class="grid-3">
+          <div class="card reveal"><div class="ico">🏷️</div><h4>Frame Pointer Omission</h4><p>في <code>-O2</code> (وMSVC دايمًا تقريبًا) مفيش <code>rbp</code> frame: الـ locals بتتوصل بـ <code>[rsp+x]</code>، و<code>rbp</code> بيبقى register عادي. ده بيصعّب الـ stack walking — وعشان كده Windows x64 بيحط جداول <b>unwind</b> (<code>.pdata</code>) لكل دالة.</p></div>
+          <div class="card reveal"><div class="ico">📏</div><h4>قاعدة الـ 16</h4><p>الـ ABI على النظامين: قبل أي <code>call</code> لازم <code>rsp</code> يبقى مضاعف 16. فعند دخول أي دالة <code>rsp ≡ 8 (mod 16)</code> (بسبب عنوان الرجوع). عشان كده هتلاقي <code>sub rsp, 28h</code> / <code>38h</code> / <code>48h</code> — كلها ≡ 8.</p></div>
+          <div class="card reveal"><div class="ico">🔁</div><h4>Recursion</h4><p>كل نداء = frame جديد فوق اللي قبله. الـ recursion العميقة جدًا (أو اللانهائية) بتخلص الـ stack (1 MB افتراضيًا على Windows، 8 MB على Linux) ← <b>stack overflow</b> (<code>0xC00000FD</code>) — ده غير الـ buffer overflow.</p></div>
+        </div>
+        <asm-lab id="s10-lab2" title="Recursion: كل نداء = frame جديد" setup="rdi=5" expect="rax=120">
+fact:                       ; rax = fact(rdi)
+    cmp rdi, 1
+    jle .base
+    push rdi                ; save n (we need it after the call)
+    dec rdi
+    call fact               ; rax = fact(n - 1)
+    pop rdi                 ; restore n
+    imul rax, rdi           ; rax = n * fact(n - 1)
+    ret
+.base:
+    mov eax, 1
+    ret
+</asm-lab>
+        <div class="callout lab-tip"><span class="ci">👀</span><div><strong>شوف الـ stack بيتملي وبيفضى</strong><p>اضغط <kbd>F7</kbd> كتير وراقب: كل <code>call fact</code> بتحط عنوان رجوع (برتقالي) + <code>push rdi</code> بتحط n. لحد ما n يوصل 1، هتلاقي 4 frames فوق بعض. وبعدين كل <code>ret</code> بتفك واحدة. جرّب <kbd>⤺ Back</kbd> ترجع لورا وتعيد.</p></div></div>
+
+        <h3 class="sub">Stack Buffer Overflow <span class="tag">🎬 scene</span></h3>
+        <p>دلوقتي تقدر تفهم أشهر ثغرة في التاريخ: الـ buffer المحلي موجود <b>تحت</b> عنوان الرجوع على طول. أي نسخ من غير فحص الطول بيطلع لفوق ويوصله:</p>
+        <div class="explorer" data-scene="overflow"></div>
+        <p>الحماية الأساسية: <b>stack canary</b>. شوف الـ compilers بيحطوها إزاي (نفس الدالة بالظبط، مرة من غير حماية ومرة بيها):</p>
+        <compiled file="canary.c" targets="gcc-O2,gcc-O2-sp,msvc-O2-gs" note="<b>gcc -fstack-protector</b>: بيقرا قيمة عشوائية من <code>fs:40</code> (= <code>fs:[0x28]</code> في الـ TLS) ويحطها في <code>[rsp+40]</code> فوق الـ buffer، وقبل الـ ret بيقارنها — لو اتغيرت يبقى حصل overflow ← <code>__stack_chk_fail</code>. <b>MSVC /GS</b>: نفس الفكرة بـ <code>__security_cookie</code> بعد ما يعمله <code>xor rsp</code>، والفحص في <code>__security_check_cookie</code>. لما تشوف الأنماط دي في binary — اعرف إنها حماية، مش جزء من منطق البرنامج (IDA بيعلّم عليها).">
+#include <string.h>
+void use(char *p);
+
+void greet(const char *name) {
+    char buf[32];
+    strcpy(buf, name);
+    use(buf);
+}
+</compiled>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>الـ RE والـ exploits</strong><p>لما تحلل exploit (أو malware بيستغل ثغرة)، أول سؤال: <b>الـ offset</b> من بداية الـ buffer لعنوان الرجوع كام؟ لو الـ buffer عند <code>rbp-0x30</code>، يبقى عنوان الرجوع عند <code>0x30 + 8 = 0x38</code> byte من أوله (الـ 8 بتوع الـ saved rbp). الـ exploits الحديثة مبتقدرش تنفذ كود من الـ stack (NX)، فبتستخدم <b>ROP</b>: سلسلة عناوين لقطع كود موجودة أصلًا بتخلص بـ <code>ret</code>.</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 10</h3></div>
+
+          <quiz id="s10-q1" answer="2">
+            <q><code>rsp = 0x1000</code>. بعد <code>push rax</code> ثم <code>push rbx</code> ثم <code>pop rcx</code>: <code>rsp</code> = ؟ و<code>rcx</code> = ؟</q>
+            <o><code>0x1008</code>، rcx = rax</o>
+            <o><code>0x0FF0</code>، rcx = rbx</o>
+            <o><code>0x0FF8</code>، rcx = rbx</o>
+            <o><code>0x0FF8</code>، rcx = rax</o>
+            <good>push ← 0xFF8، push ← 0xFF0، pop ← 0xFF8. آخر حاجة دخلت (rbx) أول حاجة طلعت (LIFO).</good>
+            <bad>كل push = −8 وكل pop = +8، وأول pop بيجيب آخر push.</bad>
+          </quiz>
+          <quiz id="s10-q2" answer="0">
+            <q><code>call func</code> عند <code>0x401020</code> وطولها 5 bytes. إيه اللي بيتعمله push؟</q>
+            <o><code>0x401025</code></o>
+            <o><code>0x401020</code></o>
+            <o>عنوان func</o>
+            <o>قيمة rbp</o>
+            <good>عنوان الرجوع = الـ instruction اللي بعد الـ call = 0x401020 + 5.</good>
+            <bad>الدالة لما ترجع لازم تكمّل من بعد الـ call.</bad>
+          </quiz>
+          <quiz id="s10-q3" answer="3">
+            <q>في دالة فيها <code>push rbp; mov rbp, rsp</code>، الـ argument الأول على الـ stack في x86 32-bit (cdecl) بيبقى عند:</q>
+            <o><code>[ebp]</code></o>
+            <o><code>[ebp+4]</code></o>
+            <o><code>[ebp-4]</code></o>
+            <o><code>[ebp+8]</code></o>
+            <good>[ebp] = saved ebp، [ebp+4] = return address، [ebp+8] = أول argument. شكل هتشوفه آلاف المرات في الـ malware الـ 32-bit.</good>
+            <bad>فوق الـ ebp المحفوظ فيه عنوان الرجوع (4 bytes في 32-bit)، وبعده الـ args.</bad>
+          </quiz>
+          <quiz id="s10-q4" answer="1">
+            <q><code>leave</code> بتعادل:</q>
+            <o><code>pop rbp; mov rsp, rbp</code></o>
+            <o><code>mov rsp, rbp; pop rbp</code></o>
+            <o><code>add rsp, 8; ret</code></o>
+            <o><code>pop rip</code></o>
+            <good>الأول ارجع rsp لقاعدة الـ frame (شيل الـ locals)، وبعدين رجّع rbp القديم.</good>
+            <bad>الترتيب عكس الـ prologue.</bad>
+          </quiz>
+          <quiz id="s10-q5" answer="2">
+            <q>دالة MSVC x64 بتبدأ بـ <code>sub rsp, 28h</code> ومفيش <code>push</code>. ليه 0x28 مش 0x20؟</q>
+            <o>غلطة في الـ compiler</o>
+            <o>عشان المتغيرات المحلية</o>
+            <o>0x20 للـ shadow space + 8 عشان الـ alignment (عند الدخول rsp ≡ 8 mod 16)</o>
+            <o>عشان عنوان الرجوع</o>
+            <good>0x28 = 40 ≡ 8 (mod 16)، فبعد الطرح rsp بيبقى مضاعف 16 قبل أي call. الـ shadow space (32) للدوال اللي هتتنادى.</good>
+            <bad>افتكر قاعدة الـ 16 والـ shadow space بتاع Windows.</bad>
+          </quiz>
+          <quiz id="s10-q6" answer="0">
+            <q>قبل الـ <code>ret</code> لقيت <code>mov rcx, [rsp+38h]</code> ثم <code>xor rcx, rsp</code> ثم <code>call __security_check_cookie</code>. ده:</q>
+            <o>فحص الـ stack canary (MSVC /GS) — الدالة فيها buffer محلي</o>
+            <o>فك تشفير</o>
+            <o>anti-debugging</o>
+            <o>بيحسب hash</o>
+            <good>علامة إن الدالة فيها array محلي (والـ compiler خايف من overflow). مش جزء من المنطق — عدّيه.</good>
+            <bad>شوف مثال canary.c فوق.</bad>
+          </quiz>
+          <quiz id="s10-q7" answer="3">
+            <q>دالة leaf على Linux (gcc -O0) بتكتب في <code>[rbp-20]</code> ومفيش <code>sub rsp</code>. ده آمن ليه؟</q>
+            <o>مش آمن، ده bug</o>
+            <o>عشان rbp بيحمي الذاكرة</o>
+            <o>عشان الـ kernel بيحجز الذاكرة دي</o>
+            <o>الـ red zone: الـ System V ABI بيضمن الـ 128 byte تحت rsp للدالة اللي مبتنادليش دوال تانية</o>
+            <good>الـ signal handlers والـ interrupts مش بيلمسوا المنطقة دي. Windows مفيهوش red zone (والـ kernel code مبيستخدمهاش).</good>
+            <bad>دي ميزة في الـ ABI بتاع Linux بتوفّر instruction.</bad>
+          </quiz>
+          <quiz id="s10-q8" answer="1">
+            <q>الفرق بين "stack overflow" و"stack buffer overflow"؟</q>
+            <o>مفيش فرق</o>
+            <o>الأول = الـ stack خلص (recursion عميقة)، والتاني = كتابة برا حدود buffer محلي فوق بيانات تانية (زي عنوان الرجوع)</o>
+            <o>الأول على Linux والتاني على Windows</o>
+            <o>الأول في الـ heap</o>
+            <good>الأول crash (0xC00000FD على Windows)، التاني ثغرة ممكن تتستغل للتحكم في RIP.</good>
+            <bad>واحد بيخلّص المساحة، والتاني بيكتب في المكان الغلط.</bad>
+          </quiz>
+
+          <challenge id="s10-c1" title="power(base, exp) بالـ recursion" level="2" io>
+            <desc>اكتب دالة <code>power</code> recursive (<code>rdi</code> = base، <code>rsi</code> = exp، النتيجة في <code>rax</code>): <code>power(b, 0) = 1</code> و<code>power(b, e) = b × power(b, e−1)</code>. واطبع <code>power(3, 13)</code> و<code>power(2, 40)</code>:<br><code>1594323</code><br><code>1099511627776</code></desc>
+            <starter>
+section .text
+global _start
+_start:
+    mov edi, 3
+    mov esi, 13
+    call power
+    mov rdi, rax
+    call print_int
+    call print_nl
+    mov edi, 2
+    mov esi, 40
+    call power
+    mov rdi, rax
+    call print_int
+    call print_nl
+    xor edi, edi
+    call exit
+
+power:
+    mov eax, 1          ; TODO
+    ret
+</starter>
+            <expected>
+1594323
+1099511627776
+</expected>
+            <solution>
+section .text
+global _start
+_start:
+    mov edi, 3
+    mov esi, 13
+    call power
+    mov rdi, rax
+    call print_int
+    call print_nl
+    mov edi, 2
+    mov esi, 40
+    call power
+    mov rdi, rax
+    call print_int
+    call print_nl
+    xor edi, edi
+    call exit
+
+power:                  ; rax = rdi ** rsi
+    test rsi, rsi
+    jnz .rec
+    mov eax, 1          ; b^0 = 1
+    ret
+.rec:
+    push rdi            ; keep base across the call
+    dec rsi
+    call power          ; rax = b^(e-1)
+    pop rdi
+    imul rax, rdi       ; b * b^(e-1)
+    ret
+</solution>
+          </challenge>
+
+          <lab-challenge id="s10-lc1" title="احترم الـ callee-saved registers" level="2">
+            <desc>اكتب دالة بترجع <code>1 + 2 + … + n</code> (n في <code>rdi</code>) في <code>rax</code> — <b>بشرط</b> تستخدم <code>rbx</code> كعدّاد جوه الدالة. <code>rbx</code> callee-saved، فلازم يرجع للـ caller بنفس قيمته (احفظه بـ <code>push</code> واسترجعه بـ <code>pop</code>). التستات بتتأكد من النتيجة ومن إن <code>rbx</code> رجع زي ما هو.</desc>
+            <starter>
+sum_n:
+    xor eax, eax
+    mov rbx, rdi        ; counter (but rbx belongs to the caller!)
+.loop:
+    add rax, rbx
+    dec rbx
+    jnz .loop
+    ret
+</starter>
+            <solution>
+sum_n:
+    push rbx            ; save the caller's rbx
+    xor eax, eax
+    mov rbx, rdi
+    test rbx, rbx
+    jz .done
+.loop:
+    add rax, rbx
+    dec rbx
+    jnz .loop
+.done:
+    pop rbx             ; restore it
+    ret
+</solution>
+            <test setup="rdi=10;rbx=0x1234" expect="rax=55;rbx=0x1234"/>
+            <test setup="rdi=100;rbx=-7" expect="rax=5050;rbx=-7"/>
+            <test setup="rdi=0;rbx=99" expect="rax=0;rbx=99" label="n = 0"/>
+          </lab-challenge>
+          <lab-challenge id="s10-lc2" title="Fibonacci recursive" level="3">
+            <desc>اكتب <code>fib(n)</code> recursive: <code>fib(0)=0</code>، <code>fib(1)=1</code>، <code>fib(n)=fib(n−1)+fib(n−2)</code>. الـ input في <code>rdi</code> والنتيجة في <code>rax</code>. محتاج تحفظ قيم على الـ stack بين النداءين. (استخدم <kbd>F8</kbd> في المعمل عشان تعدّي النداءات.)</desc>
+            <starter>
+fib:
+    mov rax, rdi
+    ret
+</starter>
+            <solution>
+fib:
+    cmp rdi, 1
+    jbe .base               ; fib(0)=0, fib(1)=1
+    push rbx
+    push rdi
+    dec rdi
+    call fib                ; rax = fib(n-1)
+    mov rbx, rax
+    pop rdi
+    push rdi
+    sub rdi, 2
+    call fib                ; rax = fib(n-2)
+    add rax, rbx
+    pop rdi
+    pop rbx
+    ret
+.base:
+    mov rax, rdi
+    ret
+</solution>
+            <test setup="rdi=0" expect="rax=0"/>
+            <test setup="rdi=1" expect="rax=1"/>
+            <test setup="rdi=10" expect="rax=55"/>
+            <test setup="rdi=20" expect="rax=6765"/>
+          </lab-challenge>
+
+          <re-task id="s10-re1" title="تتبّع الـ stack" level="1" answer="40" norm="int">
+            <desc>إيه قيمة <code>rax</code> في الآخر؟</desc>
+            <listing>
+stack_trace:
+    push 10
+    push 20
+    push 30
+    pop rax             ; ?
+    pop rbx             ; ?
+    add rax, rbx
+    pop rcx             ; ?
+    sub rax, rcx
+    ret
+</listing>
+            <verify setup="" expect="rax={ans}"/>
+            <hint>LIFO: أول pop بيجيب آخر push.</hint>
+            <explain><code>rax = 30</code>، <code>rbx = 20</code> ← <code>rax = 50</code>، <code>rcx = 10</code> ← <code>rax = 40</code>. والـ stack رجع متوازن (3 push و3 pop) فالـ <code>ret</code> لقت عنوان الرجوع الصح.</explain>
+          </re-task>
+          <re-task id="s10-re2" title="الـ offset بتاع الـ exploit" level="2" answer="56" norm="int">
+            <desc>الدالة دي فيها ثغرة. كام byte لازم المهاجم يكتبهم <b>قبل</b> ما يوصل لعنوان الرجوع بالظبط؟ (اكتب الرقم decimal أو hex)</desc>
+            <listing>
+vuln:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 0x40
+    lea rax, [rbp-0x30]     ; char buf[...]
+    mov rdi, rax
+    call gets
+    leave
+    ret
+</listing>
+            <hint>ارسم الـ frame: الـ buffer بيبدأ عند rbp−0x30. وفوق rbp فيه 8 bytes saved rbp، وبعدها عنوان الرجوع عند rbp+8.</hint>
+            <explain>من <code>rbp−0x30</code> لـ <code>rbp+8</code> = <code>0x30 + 8 = 0x38 = 56</code> byte. أول 48 byte بيملوا الـ buffer (وأي padding)، والـ 8 اللي بعدهم فوق الـ saved rbp، والـ 8 اللي بعدهم هيبقوا الـ RIP الجديد. لاحظ إن الـ <code>sub rsp, 0x40</code> مش مهم للحساب — المهم مكان الـ buffer بالنسبة لـ rbp.</explain>
+          </re-task>
+        </div>
+      </section>

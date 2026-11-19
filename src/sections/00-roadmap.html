@@ -1,0 +1,97 @@
+      <section class="section" id="roadmap" data-part="ابدأ من هنا" data-nav="خريطة الطريق" data-icon="🗺️" data-keywords="roadmap خريطة خطة البداية reverse engineering malware assembly how to use lab debugger">
+        <div class="section-head">
+          <span class="section-index">00</span>
+          <div>
+            <p class="eyebrow">ابدأ من هنا</p>
+            <h2>ليه Assembly؟ وإزاي تذاكر الكورس ده صح</h2>
+            <p class="lede">في تحليل الـ Malware مفيش source code. اللي في إيدك ملف <b>bytes</b>، والـ disassembler بيحوّله لـ <b>Assembly</b>. كل حاجة تانية — الـ decompiler، الـ signatures، الـ sandboxes — أدوات مساعدة بتغلط وبتتخدع. الـ Assembly هي <b>الحقيقة الوحيدة</b> عن اللي البرنامج بيعمله. الكورس ده هيخليك تقراها بطلاقة، وتكتبها، وتفهم الـ CPU اللي بينفذها.</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card reveal" style="--d:.02s"><div class="ico">🔬</div><h4>الـ decompiler بيكدب أحيانًا</h4><p>Ghidra وIDA بيطلعولك pseudo-C حلو… لحد ما الـ malware يستخدم obfuscation أو anti-disassembly أو calling convention غريبة. ساعتها الـ pseudo-C بيبقى غلط، واللي بيفهم الـ Assembly بس هو اللي بيكمّل.</p></div>
+          <div class="card reveal" style="--d:.06s"><div class="ico">🧬</div><h4>Shellcode وPackers مفيهمش C</h4><p>الـ shellcode والـ unpacking stubs والـ decoders بتتكتب Assembly مباشرة. مفيش decompiler هيساعدك فيها كتير — لازم تمشي فيها instruction ورا instruction.</p></div>
+          <div class="card reveal" style="--d:.1s"><div class="ico">🐞</div><h4>الـ Debugger بيتكلم Assembly</h4><p>x64dbg وWinDbg وgdb بيوروك registers وflags وstack وinstructions. عشان تتحكم في الـ sample وتعدّي الـ anti-debugging وتطلّع الـ config، لازم تفهم كل سطر.</p></div>
+          <div class="card reveal" style="--d:.14s"><div class="ico">⚡</div><h4>Patching وExploitation</h4><p>تغيير byte واحد (<code>74</code> → <code>75</code>) ممكن يقلب شرط كامل. فهم الـ encoding والـ stack هو أساس الـ patching وفهم الثغرات والـ exploits اللي الـ malware بيستغلها.</p></div>
+        </div>
+
+        <h3 class="sub">رحلتك في الكورس <span class="tag">من الـ bits لحد الـ crackmes</span></h3>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 300" role="img" aria-label="مسار الكورس">
+            <defs>
+              <linearGradient id="rmGrad" x1="0" x2="1"><stop offset="0" stop-color="#3fd0e8"/><stop offset=".55" stop-color="#b48cff"/><stop offset="1" stop-color="#ffb454"/></linearGradient>
+            </defs>
+            <path d="M60,70 C200,70 230,70 320,70 S470,70 560,70 S760,70 880,70 C960,70 960,230 880,230 S640,230 560,230 S340,230 260,230 S120,230 80,230" fill="none" stroke="url(#rmGrad)" stroke-width="3" opacity=".35"/>
+            <path class="d-flow" d="M60,70 C200,70 230,70 320,70 S470,70 560,70 S760,70 880,70 C960,70 960,230 880,230 S640,230 560,230 S340,230 260,230 S120,230 80,230" fill="none" stroke="url(#rmGrad)" stroke-width="3"/>
+            <g>
+              <circle cx="60" cy="70" r="22" class="d-box"/><text x="60" y="75" text-anchor="middle" class="d-tb">01</text>
+              <text x="60" y="118" text-anchor="middle" class="d-ts ar">الـ CPU والأرقام</text>
+              <circle cx="250" cy="70" r="22" class="d-box"/><text x="250" y="75" text-anchor="middle" class="d-tb">03</text>
+              <text x="250" y="118" text-anchor="middle" class="d-ts ar">Registers وذاكرة</text>
+              <circle cx="440" cy="70" r="22" class="d-box"/><text x="440" y="75" text-anchor="middle" class="d-tb">06</text>
+              <text x="440" y="118" text-anchor="middle" class="d-ts ar">الـ Instructions</text>
+              <circle cx="640" cy="70" r="22" class="d-box2"/><text x="640" y="75" text-anchor="middle" class="d-tb">10</text>
+              <text x="640" y="118" text-anchor="middle" class="d-ts ar">Stack ودوال</text>
+              <circle cx="840" cy="70" r="22" class="d-box2"/><text x="840" y="75" text-anchor="middle" class="d-tb">13</text>
+              <text x="840" y="118" text-anchor="middle" class="d-ts ar">برامج حقيقية</text>
+              <circle cx="840" cy="230" r="22" class="d-box2"/><text x="840" y="235" text-anchor="middle" class="d-tb">17</text>
+              <text x="840" y="280" text-anchor="middle" class="d-ts ar">أنماط الـ Compiler</text>
+              <circle cx="640" cy="230" r="22" class="d-box3"/><text x="640" y="235" text-anchor="middle" class="d-tb">20</text>
+              <text x="640" y="280" text-anchor="middle" class="d-ts ar">PE وWindows Internals</text>
+              <circle cx="440" cy="230" r="22" class="d-box3"/><text x="440" y="235" text-anchor="middle" class="d-tb">23</text>
+              <text x="440" y="280" text-anchor="middle" class="d-ts ar">Shellcode وAnti-RE</text>
+              <circle cx="250" cy="230" r="22" class="d-box3"/><text x="250" y="235" text-anchor="middle" class="d-tb">26</text>
+              <text x="250" y="280" text-anchor="middle" class="d-ts ar">ARM64</text>
+              <circle cx="80" cy="230" r="26" class="d-box4 d-pulse"/><text x="80" y="236" text-anchor="middle" class="d-tb">🏁</text>
+              <text x="80" y="280" text-anchor="middle" class="d-ts ar">Crackmes ومشاريع</text>
+            </g>
+          </svg>
+          <figcaption>كل مرحلة مبنية على اللي قبلها — متقفزش. الأجزاء الأولى بتبني <b>الآلة</b> في دماغك، والأخيرة بتستخدمها في <b>الهندسة العكسية</b>.</figcaption>
+        </figure>
+
+        <div class="steps">
+          <div class="step"><span class="n">01</span><div><h4>الأساسيات: الآلة من جوه (01 → 05)</h4><p>الـ CPU والذاكرة ودورة التنفيذ، الأنظمة العددية والـ two's complement والـ endianness، الـ registers، الذاكرة والـ addressing modes، وأدواتك: NASM وgdb وx64dbg وأول برنامج.</p></div></div>
+          <div class="step"><span class="n">02</span><div><h4>الـ Instructions بالتفصيل (06 → 12)</h4><p>نقل البيانات، الحساب والـ flags (أهم درس في الكورس)، الـ bits والـ shifts، التحكم في التدفق، الـ stack والدوال، الـ calling conventions (Linux وWindows و32-bit)، والـ string instructions.</p></div></div>
+          <div class="step"><span class="n">03</span><div><h4>البرمجة الحقيقية (13 → 16)</h4><p>برامج Linux كاملة بالـ syscalls، الـ arrays والـ structs، Assembly مع C والـ macros وبرامج Windows x64 بتنادي الـ API، والـ floating point والـ SIMD زي ما بتظهر في الكود الحقيقي.</p></div></div>
+          <div class="step"><span class="n">04</span><div><h4>الهندسة العكسية (17 → 26)</h4><p>أنماط الـ compilers (gcc وMSVC)، منهجية قراية الـ disassembly، الـ machine code والـ patching، PE/ELF، الـ x86 32-bit، الـ PEB والـ API hashing، الـ shellcode، الـ anti-debugging والـ obfuscation، C++ في الـ binary، وARM64.</p></div></div>
+          <div class="step"><span class="n">05</span><div><h4>التطبيق (27 → النهاية)</h4><p>سلسلة crackmes بتتحل جوه الصفحة، مشاريع حقيقية (string decoders، API hash resolver، PE walker، تحليل shellcode…)، وCheat Sheet ومصادر.</p></div></div>
+        </div>
+
+        <h3 class="sub">إزاي تستخدم الصفحة <span class="tag">الأدوات اللي معاك</span></h3>
+        <div class="grid-3">
+          <div class="card reveal"><div class="ico">▶</div><h4>تشغيل حقيقي</h4><p>زرار <b>تشغيل</b> بيبعت الكود لـ Compiler Explorer: بيتعمله assemble بـ <b>NASM 3.01</b> ويتربط بـ <code>ld</code> ويتنفذ على Linux x86-64 حقيقي.</p></div>
+          <div class="card reveal"><div class="ico">🔬</div><h4>Debug خطوة بخطوة</h4><p>زرار <b>Debug</b> بيفتح الكود في المعمل: debugger كامل جوه الصفحة بيشتغل <b>من غير إنترنت</b>. نفس اختصارات x64dbg: <kbd>F7</kbd> و<kbd>F8</kbd> و<kbd>F9</kbd>.</p></div>
+          <div class="card reveal"><div class="ico">⚙</div><h4>الـ Machine Code</h4><p>زرار <b>Bytes</b> بيوريك كل instruction اتحولت لأنهي bytes — زي عمود الـ bytes في x64dbg وIDA بالظبط.</p></div>
+          <div class="card reveal"><div class="ico">⧉</div><h4>Graph View</h4><p>أي listing عليه زرار <b>Graph</b> بيرسم الـ control-flow graph زي IDA: أخضر = الشرط اتحقق، أحمر = متحققش.</p></div>
+          <div class="card reveal"><div class="ico">🏭</div><h4>Compilers حقيقيين</h4><p>كل مقارنة "C → Assembly" في الكورس طالعة من <b>gcc</b> و<b>MSVC</b> و<b>clang</b> فعليًا وقت بناء الصفحة — مش مكتوبة بالإيد.</p></div>
+          <div class="card reveal"><div class="ico">🎯</div><h4>5 أنواع تمارين</h4><p>أسئلة، تحديات بتتصحح على CPU حقيقي، تحديات Lab بتتصحح في الـ emulator، مهام RE (لاقي الـ key)، ومشاريع.</p></div>
+        </div>
+
+        <div class="callout lab-tip"><span class="ci">🧪</span><div><strong>المعمل متحقق منه ضد CPU حقيقي</strong><p>الـ emulator اللي جوه الصفحة اتكتب مخصوص للكورس، واتجرب على <b>أكتر من 23,000 instruction عشوائية</b> اتنفذت على معالج حقيقي — نفس الـ registers ونفس الـ flags بالظبط. والـ bytes اللي بيطلعها متطابقة مع NASM في <b>3,237 حالة</b>. وكل مثال NASM في الصفحة بيتنفذ على Linux حقيقي ونتيجته لازم تطابق نتيجة المعمل وإلا الصفحة مبتتبنيش.</p></div></div>
+
+        <div class="callout warn"><span class="ci">🛡️</span><div><strong>قاعدة الأمان</strong><p>كل الأكواد هنا تعليمية وآمنة. لما تبدأ تحلل samples حقيقية: <b>VM معزولة دايمًا</b> (FLARE-VM للـ Windows وREMnux للـ Linux)، من غير shared folders، شبكة host-only، وsnapshot نضيف ترجعله بعد كل تحليل. متشغلش sample على جهازك الأساسي أبدًا.</p></div></div>
+
+        <div class="callout tip"><span class="ci">💡</span><div><strong>إزاي تذاكر</strong><p>(1) اقرا الشرح. (2) افتح المعمل وامشي بـ <kbd>F7</kbd> وتوقّع قيمة كل register <b>قبل</b> ما تضغط. (3) حل التمارين من غير ما تبص على الحل. (4) بعد كل جزء: خد أي برنامج كتبته بـ C، اعمله compile، وافتحه في x64dbg أو Ghidra. التوقّع قبل التنفيذ هو أسرع طريق لبناء "CPU في دماغك".</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> قبل ما تبدأ</h3></div>
+          <quiz id="s00-q1" answer="2">
+            <q>إنت بتحلل sample جديد ومعاك Ghidra. الـ decompiler طلّع pseudo-C شكله غريب ومش منطقي في function مهمة. أحسن خطوة؟</q>
+            <o>تثق في الـ pseudo-C وتكمّل</o>
+            <o>تشغّل الـ sample على جهازك عشان تشوف بيعمل إيه</o>
+            <o>ترجع للـ disassembly نفسه وتقرا الـ instructions، وتأكد بالـ debugger جوه VM</o>
+            <o>تعمل skip للـ function</o>
+            <good>الـ Assembly هي المصدر الحقيقي. الـ decompiler مجرد تفسير ليها وممكن يتلخبط من الـ obfuscation أو الـ anti-disassembly. والتشغيل دايمًا جوه VM معزولة.</good>
+            <bad>فكّر: إيه المصدر اللي مبيكدبش؟ وفين المكان الآمن للتشغيل؟</bad>
+          </quiz>
+          <quiz id="s00-q2" answer="1">
+            <q>المعمل جوه الصفحة بيستخدم نفس اختصارات x64dbg. <kbd>F8</kbd> بيعمل إيه؟</q>
+            <o>Step Into: بيدخل جوه أي call</o>
+            <o>Step Over: بينفذ الـ call كله ويقف على اللي بعده</o>
+            <o>Run لحد الآخر</o>
+            <o>بيرجع خطوة لورا</o>
+            <good><kbd>F7</kbd> = Step Into، <kbd>F8</kbd> = Step Over، <kbd>F9</kbd> = Run. نفس اللي هتستخدمه في x64dbg بالظبط.</good>
+            <bad>Into = تدخل جوه الدالة، Over = تعدّيها.</bad>
+          </quiz>
+        </div>
+      </section>

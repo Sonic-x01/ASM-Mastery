@@ -1,0 +1,311 @@
+      <section class="section" id="s12" data-part="الجزء 2 · الـ Instructions بالتفصيل" data-nav="الـ Strings والذاكرة" data-icon="🧵" data-keywords="string instructions movsb movsq stosb stosq lodsb scasb cmpsb rep repe repne direction flag cld std memcpy memset strlen strcmp wide string utf-16 rsi rdi rcx">
+        <div class="section-head">
+          <span class="section-index">12</span>
+          <div>
+            <p class="eyebrow">المرحلة الثانية عشر · آخر مرحلة في الجزء 2</p>
+            <h2>الـ String Instructions: نسخ وملء وبحث ومقارنة</h2>
+            <p class="lede">x86 فيه instructions مخصوصة للتعامل مع blocks من الذاكرة: بتشتغل على <code>[rsi]</code> و<code>[rdi]</code> وبتحرك الـ pointers لوحدها، ومع <code>rep</code> بتلف <code>rcx</code> مرة. هتشوفها في <code>memcpy</code>/<code>memset</code> اللي الـ compiler بيحطهم inline، في الكود القديم، وكتير جدًا في الـ <b>shellcode</b> والـ unpackers لأنها صغيرة.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">العيلة كلها <span class="tag">b · w · d · q</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>بتعمل (مرة واحدة)</th><th>مع rep</th><th>المقابل في C</th></tr></thead>
+            <tbody>
+              <tr><td><code>movsb/w/d/q</code></td><td><code>[rdi] ← [rsi]</code>؛ rsi وrdi += حجم</td><td><code>rep</code>: rcx مرة</td><td><code>memcpy</code></td></tr>
+              <tr><td><code>stosb/w/d/q</code></td><td><code>[rdi] ← al/ax/eax/rax</code>؛ rdi += حجم</td><td><code>rep</code></td><td><code>memset</code></td></tr>
+              <tr><td><code>lodsb/w/d/q</code></td><td><code>al/… ← [rsi]</code>؛ rsi += حجم</td><td>نادر مع rep</td><td>قراية byte ورا byte (loops الـ decoders)</td></tr>
+              <tr><td><code>scasb/w/d/q</code></td><td><code>cmp al, [rdi]</code>؛ rdi += حجم</td><td><code>repne</code>: لحد ما يلاقي</td><td><code>strlen</code> / <code>memchr</code></td></tr>
+              <tr><td><code>cmpsb/w/d/q</code></td><td><code>cmp [rsi], [rdi]</code>؛ الاتنين += حجم</td><td><code>repe</code>: طول ما متساويين</td><td><code>memcmp</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>الحجم بييجي من آخر حرف (<code>b</code>=1، <code>w</code>=2، <code>d</code>=4، <code>q</code>=8)، والاتجاه من <b>DF</b>: <code>cld</code> (DF=0) = لقدّام وده الطبيعي (الـ ABI بيضمنه عند أي call)، و<code>std</code> = لورا. و<code>rep</code> بتفحص <code>rcx</code> <b>قبل</b> كل لفة: لو <code>rcx = 0</code> من الأول مفيش ولا لفة.</p>
+        <div class="explorer" data-scene="repmovs"></div>
+
+        <h3 class="sub">التلاتة الأساسيين في المعمل <span class="tag">memset · memcpy · strlen</span></h3>
+        <asm-lab id="s12-lab1" title="memset وmemcpy وstrlen بالـ string instructions">
+section .data
+src:  db "malware.exe", 0
+dst:  times 16 db 0xEE
+
+section .text
+demo:
+    ; memset(dst, 0, 16)
+    lea rdi, [rel dst]
+    xor eax, eax
+    mov ecx, 16
+    rep stosb               ; 16 x [rdi++] = al
+
+    ; memcpy(dst, src, 12)
+    lea rsi, [rel src]
+    lea rdi, [rel dst]
+    mov ecx, 12
+    rep movsb               ; 12 x [rdi++] = [rsi++]
+
+    ; strlen(src) the "old school" way
+    lea rdi, [rel src]
+    xor eax, eax            ; al = 0 : the byte we search for
+    mov rcx, -1             ; "infinite" counter
+    repne scasb             ; scan until [rdi] == 0
+    not rcx                 ; rcx = length + 1
+    dec rcx                 ; rcx = strlen = 11
+    mov rax, rcx
+    ret
+</asm-lab>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>حيلة <code>repne scasb</code> لحساب الطول</strong><p><code>or rcx, -1</code> (أو <code>mov rcx, -1</code>) + <code>repne scasb</code> + <code>not rcx</code> + <code>dec rcx</code> = <code>strlen</code>. الـ compilers القديمة (والـ shellcode وكود Delphi) بيستخدموها كتير. لو شفت الـ 4 سطور دول في sample — مش محتاج تحللهم، دي <code>strlen</code>. وبالـ <code>w</code> (<code>repne scasw</code>) = <code>wcslen</code> للـ wide strings.</p></div></div>
+
+        <h3 class="sub">الـ Compilers وال strings <span class="tag">real output</span></h3>
+        <compiled file="strops.c" targets="gcc-Os,msvc-O2" note="<b>gcc -Os</b> (أولويته الحجم): الـ memset لـ 256 byte = <code>rep stosd</code> بـ <code>ecx = 64</code> (64 × 4 bytes)، والنسخ = <code>rep movsd</code>. وكمان <b>فهم</b> إن الـ loop بتاعة <code>my_strlen</code> هي <code>strlen</code> واستبدلها بنداء (<b>idiom recognition</b>). <b>MSVC /O2</b>: نادى <code>memset</code>، وعمل النسخ بـ loop من <code>movups</code> (16 byte في المرة). الـ decompiler بيرجّع الأشكال دي لـ <code>memset</code>/<code>memcpy</code> — وإنت لازم تعرفهم في الـ disassembly.">
+#include <string.h>
+struct big { char data[256]; };
+
+void zero_big(struct big *b) { memset(b, 0, sizeof *b); }
+void copy_big(struct big *d, const struct big *s) { *d = *s; }
+
+size_t my_strlen(const char *s) {
+    size_t n = 0;
+    while (s[n])
+        n++;
+    return n;
+}
+</compiled>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🐞</div><h4>الـ 0xCC في الـ Debug builds</h4><p>MSVC مع <code>/RTC</code> (الافتراضي في Debug) بيملا الـ locals بـ <code>0xCC</code> بـ <code>rep stosd</code> وeax = <code>0xCCCCCCCC</code> في أول كل دالة — عشان أي استخدام لمتغير من غير قيمة يبان. لو شفت ده في sample = اتعمله compile كـ Debug (هدية: غالبًا فيه symbols ومسارات PDB).</p></div>
+          <div class="card reveal"><div class="ico">🧬</div><h4>في الـ shellcode والـ unpackers</h4><p><code>rep movsb</code> = انسخ الـ payload لمكان جديد. <code>lodsb</code> + <code>xor al, key</code> + <code>stosb</code> = decoder كلاسيكي بيقرا byte ويفكه ويكتبه. وشكل <code>lodsb</code> + <code>ror</code> + <code>add</code> = حساب hash لاسم API.</p></div>
+        </div>
+
+        <h3 class="sub">Wide strings (UTF-16) <span class="tag">Windows</span></h3>
+        <p>على Windows أغلب الـ strings الداخلية UTF-16 (2 bytes للحرف). الـ loops عليها بتستخدم <code>word</code> و scale 2: <code>movzx eax, word ptr [rcx+rdx*2]</code>، و<code>lodsw</code>/<code>stosw</code>/<code>scasw</code>. ومقارنات أسماء الـ DLLs في الـ PEB (هنشوفها) بتبقى على UTF-16 — وكتير بتتعمل case-insensitive بـ <code>or ax, 20h</code>.</p>
+        <nasm-example file="wide.asm" io>
+default rel
+section .data
+wname: dw 'K','E','R','N','E','L','3','2','.','D','L','L', 0   ; UTF-16 string
+
+section .text
+global _start
+_start:
+    ; length of a wide string with lodsw
+    lea rsi, [wname]
+    xor ecx, ecx
+.count:
+    lodsw                   ; ax = [rsi], rsi += 2
+    test ax, ax
+    jz .done
+    inc ecx
+    jmp .count
+.done:
+    mov edi, ecx
+    call print_int          ; 12 characters
+    call print_nl
+    ; print it lowercase: or every letter with 0x20
+    lea rsi, [wname]
+.print:
+    lodsw
+    test ax, ax
+    jz .end
+    cmp al, 'A'
+    jb .out
+    cmp al, 'Z'
+    ja .out
+    or al, 0x20             ; to lower case
+.out:
+    movzx edi, al
+    call print_char
+    jmp .print
+.end:
+    call print_nl
+    xor edi, edi
+    call exit
+</nasm-example>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 12</h3></div>
+
+          <quiz id="s12-q1" answer="2">
+            <q><code>rep stosq</code> مع <code>rcx = 4</code> و<code>rax = 0</code>. بتصفّر كام byte؟</q>
+            <o>4</o>
+            <o>8</o>
+            <o>32</o>
+            <o>64</o>
+            <good>4 مرات × 8 bytes (q = qword) = 32 byte.</good>
+            <bad>الـ q = 8 bytes في كل مرة.</bad>
+          </quiz>
+          <quiz id="s12-q2" answer="0">
+            <q><code>movsb</code> (من غير rep) مع <code>DF = 0</code> بتعمل إيه في الـ registers؟</q>
+            <o>rsi += 1، rdi += 1</o>
+            <o>rsi −= 1، rdi −= 1</o>
+            <o>rcx −= 1 بس</o>
+            <o>مبتغيرش registers</o>
+            <good>بتنسخ byte وتحرك الـ pointer-ين لقدّام. rcx بيتغير بس مع rep.</good>
+            <bad>DF = 0 = لقدّام.</bad>
+          </quiz>
+          <quiz id="s12-q3" answer="3">
+            <q><code>repe cmpsb</code> بتقف إمتى؟</q>
+            <o>لما تلاقي byte متساوي</o>
+            <o>بعد rcx مرة بالظبط دايمًا</o>
+            <o>لما rsi = rdi</o>
+            <o>لما تلاقي اختلاف (ZF = 0) أو rcx يوصل 0 — أيهما الأول</o>
+            <good>repe = "كرر طول ما متساويين". بعدها <code>jne</code> = لقينا اختلاف (memcmp ≠ 0).</good>
+            <bad>e = equal: الـ rep بتكمّل طول ما الشرط ده متحقق.</bad>
+          </quiz>
+          <quiz id="s12-q4" answer="1">
+            <q>لقيت في sample: <code>lodsb</code> ثم <code>xor al, 5Ah</code> ثم <code>stosb</code> ثم <code>loop</code> لنفس المكان، وrsi = rdi في الأول. ده:</q>
+            <o>نسخ string</o>
+            <o>XOR decoder بيفك buffer في مكانه بمفتاح 0x5A (rcx byte)</o>
+            <o>strlen</o>
+            <o>مقارنة</o>
+            <good>اقرا byte → فكه → اكتبه في نفس المكان → كرر. حط breakpoint بعد الـ loop وشوف الـ plaintext.</good>
+            <bad>lods = اقرا، xor = غيّر، stos = اكتب.</bad>
+          </quiz>
+          <quiz id="s12-q5" answer="2">
+            <q>في أول دالة MSVC لقيت <code>mov eax, 0CCCCCCCCh</code> و<code>rep stosd</code>. ده:</q>
+            <o>تشفير</o>
+            <o>anti-debugging</o>
+            <o>Debug build بيملا الـ locals بـ 0xCC (/RTC)</o>
+            <o>breakpoints</o>
+            <good>ميزة debug في MSVC. الـ release builds مفيهاش ده. (ولاحظ: 0xCC = int3، فلو حد نفذ ذاكرة متملية بيها هيوقف على طول.)</good>
+            <bad>ده سلوك compiler في نوع معيّن من الـ builds.</bad>
+          </quiz>
+          <quiz id="s12-q6" answer="0">
+            <q><code>movzx eax, word ptr [rcx+rax*2]</code> جوه loop. ده بيقرا:</q>
+            <o>حرف من wide string (UTF-16)</o>
+            <o>byte من buffer</o>
+            <o>pointer</o>
+            <o>dword</o>
+            <good>word + scale 2 = عناصر 2 bytes = wchar_t على Windows.</good>
+            <bad>الحجم word والـ scale 2…</bad>
+          </quiz>
+
+          <challenge id="s12-c1" title="uppercase بـ lodsb/stosb" level="2" io>
+            <desc>حوّل الـ string <code>msg</code> لـ uppercase <b>في مكانها</b> باستخدام <code>lodsb</code> و<code>stosb</code> (rsi = rdi = بداية الـ string)، واطبعها. الحروف الصغيرة بس اللي تتغير (<code>and al, 0DFh</code> أو <code>sub al, 32</code>). المطلوب:<br><code>CONNECT TO 10.0.0.5:4444</code></desc>
+            <starter>
+default rel
+section .data
+msg: db "connect to 10.0.0.5:4444", 0
+
+section .text
+global _start
+_start:
+    lea rsi, [msg]
+    lea rdi, [msg]
+    ; loop: lodsb / if 'a'..'z' make it upper / stosb / stop after the 0
+
+    lea rdi, [msg]
+    call print_str
+    call print_nl
+    xor edi, edi
+    call exit
+</starter>
+            <expected>
+CONNECT TO 10.0.0.5:4444
+</expected>
+            <solution>
+default rel
+section .data
+msg: db "connect to 10.0.0.5:4444", 0
+
+section .text
+global _start
+_start:
+    lea rsi, [msg]
+    lea rdi, [msg]
+.next:
+    lodsb                   ; al = *rsi++
+    cmp al, 'a'
+    jb .store
+    cmp al, 'z'
+    ja .store
+    and al, 0xDF            ; clear bit 5 -> upper case
+.store:
+    stosb                   ; *rdi++ = al
+    test al, al
+    jnz .next
+
+    lea rdi, [msg]
+    call print_str
+    call print_nl
+    xor edi, edi
+    call exit
+</solution>
+          </challenge>
+
+          <lab-challenge id="s12-lc1" title="memcmp بـ repe cmpsb" level="2">
+            <desc><code>rdi</code> و<code>rsi</code> = pointers لـ buffers، <code>rdx</code> = الطول. رجّع <code>rax = 1</code> لو متطابقين تمامًا، و<code>0</code> لو لأ. استخدم <code>repe cmpsb</code> (افتكر: لو الطول صفر، يعتبروا متطابقين).</desc>
+            <starter>
+equal:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+equal:
+    mov rcx, rdx
+    xor eax, eax
+    test rcx, rcx
+    jz .same                ; length 0 -> equal
+    repe cmpsb              ; compare while equal and rcx != 0
+    jne .diff               ; stopped on a difference
+.same:
+    mov eax, 1
+.diff:
+    ret
+</solution>
+            <test setup='rdi=&amp;"password";rsi=&amp;"password";rdx=8' expect="rax=1"/>
+            <test setup='rdi=&amp;"password";rsi=&amp;"passw0rd";rdx=8' expect="rax=0"/>
+            <test setup='rdi=&amp;"abc";rsi=&amp;"abd";rdx=2' expect="rax=1" label="أول 2 بس"/>
+            <test setup='rdi=&amp;"x";rsi=&amp;"y";rdx=0' expect="rax=1" label="طول 0"/>
+          </lab-challenge>
+          <lab-challenge id="s12-lc2" title="اعكس string في مكانها" level="3">
+            <desc><code>rdi</code> = string منتهية بصفر. اعكسها في مكانها (<code>"abc"</code> ← <code>"cba"</code>). احسب الطول الأول، وبعدين بدّل الأطراف لحد ما يتقابلوا.</desc>
+            <starter>
+reverse:
+    ret
+</starter>
+            <solution>
+reverse:
+    mov rsi, rdi            ; rsi = left
+    mov rdx, rdi
+.find_end:
+    cmp byte [rdx], 0
+    je .found
+    inc rdx
+    jmp .find_end
+.found:
+    dec rdx                 ; rdx = right (last char)
+.swap:
+    cmp rsi, rdx
+    jae .done
+    mov al, [rsi]
+    mov cl, [rdx]
+    mov [rsi], cl
+    mov [rdx], al
+    inc rsi
+    dec rdx
+    jmp .swap
+.done:
+    ret
+</solution>
+            <test setup='rdi=&amp;"abc"' expect='str(rdi)="cba"'/>
+            <test setup='rdi=&amp;"malware"' expect='str(rdi)="erawlam"'/>
+            <test setup='rdi=&amp;"x"' expect='str(rdi)="x"'/>
+            <test setup='rdi=&amp;""' expect='str(rdi)=""'/>
+          </lab-challenge>
+
+          <re-task id="s12-re1" title="الدالة دي إيه؟" level="1" answer="strlen" norm="text">
+            <desc>اسم الدالة المعروفة اللي الكود ده بيعملها؟ (بترجع في <code>rax</code>)</desc>
+            <listing>
+func:
+    xor eax, eax
+    or rcx, -1
+    repne scasb
+    not rcx
+    lea rax, [rcx-1]
+    ret
+</listing>
+            <verify setup='rdi=&amp;"hello"' expect="rax=5"/>
+            <hint>بتدوّر على byte = al = 0، وبتعد…</hint>
+            <explain>دي <code>strlen(rdi)</code> بالـ idiom القديم: بتدوّر على الـ NUL، و<code>not rcx</code> − 1 = عدد الحروف. نسخة <code>lea rax, [rcx-1]</code> بتطرح من غير ما تغيّر rcx.</explain>
+          </re-task>
+        </div>
+      </section>

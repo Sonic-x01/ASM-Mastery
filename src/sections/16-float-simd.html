@@ -1,0 +1,355 @@
+      <section class="section" id="s16" data-part="الجزء 3 · البرمجة الحقيقية" data-nav="Floating Point وSIMD" data-icon="⚡" data-keywords="sse sse2 avx xmm ymm zmm movss movsd addsd mulsd divsd cvtsi2sd cvttsd2si comisd ucomisd nan x87 fld fstp st0 fnstenv pxor xorps movdqa movdqu movups pcmpeqb pmovmskb pshufb pshufd punpcklbw aesenc vex vectorization __xmm __real stack string">
+        <div class="section-head">
+          <span class="section-index">16</span>
+          <div>
+            <p class="eyebrow">المرحلة السادسة عشر · الـ registers العريضة</p>
+            <h2>Floating Point وSIMD: الـ xmm في كل حتة</h2>
+            <p class="lede">ممكن تفتكر إن الـ xmm registers للـ floats والألعاب بس. لكن في الـ reverse engineering بتشوفها في كل function تقريبًا: الـ compilers بيستخدموها عشان ينسخوا structs، ويصفّروا buffers، ويبنوا stack strings، ويعملوا vectorization لـ loops التشفير. والـ malware نفسه بيستخدم AES-NI. المرحلة دي هتخليك تقرا الكود ده من غير ما تتوه.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الـ Registers: xmm ⊂ ymm ⊂ zmm</h3>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 400" role="img" aria-label="xmm ymm zmm والـ lanes">
+            <text x="40" y="30" class="d-tx">bit 511</text><text x="924" y="30" class="d-tx">bit 0</text>
+            <rect x="40" y="40" width="920" height="38" rx="8" class="d-box2"/><text x="270" y="65" text-anchor="middle" class="d-tb">ZMM0 — 512 bit (AVX-512)</text>
+            <rect x="500" y="86" width="460" height="38" rx="8" class="d-box"/><text x="615" y="111" text-anchor="middle" class="d-tb">YMM0 — 256 (AVX)</text>
+            <rect x="730" y="132" width="230" height="38" rx="8" class="d-box3"/><text x="845" y="157" text-anchor="middle" class="d-tb">XMM0 — 128 (SSE)</text>
+            <text x="960" y="196" text-anchor="end" class="d-ts ar">الـ 128 bit دول بيتقسموا lanes حسب الـ instruction (الـ lane 0 على اليمين = أصغر bits):</text>
+            <g font-size="11">
+              <text x="40" y="232" class="d-ts">16 × byte</text>
+              <g class="d-box4"><rect x="180" y="216" width="780" height="26" rx="5"/></g>
+              <path d="M228.75 216v26M277.5 216v26M326.25 216v26M375 216v26M423.75 216v26M472.5 216v26M521.25 216v26M570 216v26M618.75 216v26M667.5 216v26M716.25 216v26M765 216v26M813.75 216v26M862.5 216v26M911.25 216v26" class="d-ar"/>
+              <text x="935" y="234" text-anchor="middle" class="d-tx">0</text><text x="204" y="234" text-anchor="middle" class="d-tx">15</text>
+              <text x="40" y="268" class="d-ts">8 × word</text>
+              <rect x="180" y="252" width="780" height="26" rx="5" class="d-box4"/>
+              <path d="M277.5 252v26M375 252v26M472.5 252v26M570 252v26M667.5 252v26M765 252v26M862.5 252v26" class="d-ar"/>
+              <text x="40" y="304" class="d-ts">4 × dword / float</text>
+              <rect x="180" y="288" width="780" height="26" rx="5" class="d-box"/>
+              <path d="M375 288v26M570 288v26M765 288v26" class="d-ar"/>
+              <text x="862" y="306" text-anchor="middle" class="d-tx">addps · paddd</text>
+              <text x="40" y="340" class="d-ts">2 × qword / double</text>
+              <rect x="180" y="324" width="780" height="26" rx="5" class="d-box"/>
+              <path d="M570 324v26" class="d-ar"/>
+              <text x="765" y="342" text-anchor="middle" class="d-tx">addpd · paddq</text>
+              <text x="40" y="376" class="d-ts">scalar double</text>
+              <rect x="180" y="360" width="390" height="26" rx="5" class="d-dim"/>
+              <rect x="570" y="360" width="390" height="26" rx="5" class="d-box3"/>
+              <text x="765" y="378" text-anchor="middle" class="d-tx">addsd: الـ lane ده بس</text>
+              <text x="375" y="378" text-anchor="middle" class="d-tx">upper 64: unchanged</text>
+            </g>
+          </svg>
+          <figcaption>16 register: <code>xmm0–xmm15</code> (و32 مع AVX-512). الـ <b>p</b> في الأول = packed (كل الـ lanes)، الـ <b>s</b> في الآخر = single (float)، الـ <b>d</b> = double: <code>addps</code> = 4 floats، <code>addsd</code> = double واحد (scalar).</figcaption>
+        </figure>
+
+        <div class="grid-3">
+          <div class="card reveal"><div class="ico">🧮</div><h4>1. حسابات float/double</h4><p>من x86-64، كل حسابات الـ <code>float</code>/<code>double</code> بتتعمل بـ SSE (مش x87). الـ arguments والـ return في <code>xmm0…</code>.</p></div>
+          <div class="card reveal"><div class="ico">📦</div><h4>2. نسخ وتصفير البيانات</h4><p><code>memset</code>/<code>memcpy</code> الصغيرة ونسخ الـ structs بتتحول لـ <code>movups</code> 16 byte في المرة. <code>pxor xmm0, xmm0</code> = صفر.</p></div>
+          <div class="card reveal"><div class="ico">🔐</div><h4>3. Vectorization وcrypto</h4><p>loops الـ XOR بتتعمل 16 byte في المرة، و<code>aesenc</code> (AES-NI) و<code>pclmulqdq</code> بيكشفوا تشفير حقيقي (ransomware!).</p></div>
+        </div>
+
+        <h3 class="sub">Scalar SSE: الـ float والـ double <span class="tag">movsd · addsd · cvt</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>بتعمل إيه</th><th>C</th></tr></thead>
+            <tbody>
+              <tr><td><code>movsd xmm0, [mem]</code> / <code>movss</code></td><td>تحميل/تخزين double / float</td><td><code>double x = *p;</code></td></tr>
+              <tr><td><code>addsd · subsd · mulsd · divsd · sqrtsd</code></td><td>الحسابات (النتيجة في الأول)</td><td><code>x * y</code></td></tr>
+              <tr><td><code>cvtsi2sd xmm0, rax</code></td><td>int ← double</td><td><code>(double)n</code></td></tr>
+              <tr><td><code>cvttsd2si eax, xmm0</code></td><td>double ← int بـ <b>truncate</b> (الـ t الزيادة)</td><td><code>(int)x</code></td></tr>
+              <tr><td><code>cvtsd2ss</code> / <code>cvtss2sd</code></td><td>double ↔ float</td><td><code>(float)d</code></td></tr>
+              <tr><td><code>comisd</code> / <code>ucomisd</code></td><td>مقارنة ← ZF, PF, CF</td><td><code>a &lt; b</code></td></tr>
+              <tr><td><code>pxor xmm0, xmm0</code> / <code>xorps</code></td><td>صفّر (= 0.0)</td><td><code>double s = 0;</code></td></tr>
+              <tr><td><code>movq rax, xmm0</code> / <code>movd</code></td><td>انقل الـ bits زي ما هي بين xmm وregister عادي</td><td><code>memcpy(&amp;u, &amp;d, 8)</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <compiled file="float_math.c" targets="gcc-O2,msvc-O2,gcc32-O2" note="<b>الثوابت</b>: gcc حط π في <code>.LC0</code> كـ <code>.long 1413754129, 1074340347</code> = الـ bits بتاعة الـ double (low dword الأول) — جرّبها في الأداة اللي تحت. MSVC أسهل: اسم الثابت نفسه فيه القيمة <code>__real@400921fb54442d11</code> = 3.14159. <b>is_equal</b>: <code>ucomisd</code> ثم <code>jp</code> (NaN ← false) ثم <code>jne</code>. <b>is_less</b>: المقارنة معكوسة <code>comisd xmm1, xmm0</code> + <code>seta</code> — <b>a</b>bove مش <b>g</b>reater. <b>MSVC from_long</b>: <code>movd xmm0, ecx</code> لأن <code>long</code> على Windows = 32 bit. و<b>32-bit gcc</b> لسه بيستخدم x87: <code>fld</code>/<code>fmul</code> والنتيجة بترجع في <code>st(0)</code>.">
+double area(double r) { return 3.14159265358979 * r * r; }
+
+float average(const float *a, int n) {
+    float s = 0;
+    for (int i = 0; i < n; i++) s += a[i];
+    return s / n;
+}
+
+int to_int(double x) { return (int)x; }          /* truncation */
+double from_long(long x) { return x; }
+
+int is_less(double a, double b)  { return a < b; }
+int is_equal(double a, double b) { return a == b; }
+</compiled>
+
+        <h3 class="sub">مقارنة الـ floats: ليه ja مش jg؟</h3>
+        <p><code>comisd</code>/<code>ucomisd</code> مش بيظبطوا SF وOF — بيظبطوا <b>ZF وPF وCF</b> بس، بنفس شكل المقارنة الـ unsigned. فالـ compiler بيستخدم <code>ja/jae/jb/jbe</code>. والـ NaN (unordered) بيخلّي الثلاثة = 1. جرّب:</p>
+        <div class="widget" data-widget="fcmp"></div>
+        <div class="callout tip"><span class="ci">💡</span><div><strong>comisd ولا ucomisd؟</strong><p>الاتنين بيطلعوا نفس الـ flags. الفرق: <code>comisd</code> بيرفع exception (invalid) لأي NaN، و<code>ucomisd</code> للـ signaling NaN بس. الـ compilers بيستخدموا <code>ucomisd</code> لـ <code>==</code>/<code>!=</code> و<code>comisd</code> لـ <code>&lt; &gt; &lt;= &gt;=</code>. للـ reversing: اقراهم زي بعض.</p></div></div>
+
+        <h3 class="sub">برنامج SSE كامل <span class="tag">بيشتغل على CPU حقيقي</span></h3>
+        <nasm-example file="sse_area.asm" io>
+default rel
+section .data
+pi:     dq 3.141592653589793
+one:    dq 1.0
+limit:  dq 60.0
+k1000:  dq 1000.0
+s_r:    db "r=", 0
+s_a:    db "  area=", 0
+
+section .text
+global _start
+_start:
+    movsd xmm6, [one]               ; r = 1.0
+.loop:
+    movsd xmm0, xmm6
+    mulsd xmm0, xmm0                ; r*r
+    mulsd xmm0, [pi]                ; area = pi*r*r
+    comisd xmm0, [limit]            ; flags like an UNSIGNED cmp
+    ja .done                        ; area > 60.0 -> stop
+    lea rdi, [s_r]
+    call print_str
+    cvttsd2si rdi, xmm6             ; (long)r
+    call print_int
+    lea rdi, [s_a]
+    call print_str
+    call print_fixed3               ; xmm0 with 3 decimals
+    call print_nl
+    addsd xmm6, [one]               ; r += 1.0
+    jmp .loop
+.done:
+    xor edi, edi
+    call exit
+
+; print xmm0 (>= 0) as "int.ddd" (truncated). clobbers rax, xmm0, xmm1
+print_fixed3:
+    cvttsd2si rax, xmm0             ; integer part
+    mov rdi, rax
+    call print_int
+    mov dil, '.'
+    call print_char
+    cvtsi2sd xmm1, rax              ; back to double
+    subsd xmm0, xmm1                ; fraction 0.xxx
+    mulsd xmm0, [k1000]
+    cvttsd2si rax, xmm0             ; 0..999
+    mov dil, '0'
+    cmp rax, 100                    ; zero padding: 5 -> "005"
+    jae .p
+    call print_char
+    cmp rax, 10
+    jae .p
+    call print_char
+.p: mov rdi, rax
+    call print_int
+    ret
+</nasm-example>
+        <p>(المعمل بتاعنا مبيدعمش SSE، فالمثال ده بيتشغّل على Compiler Explorer بس. لاحظ إن الـ syscalls مش بتبوّظ الـ xmm registers، فـ <code>xmm6</code> فضل محتفظ بقيمته.)</p>
+
+        <h3 class="sub">x87: الـ FPU القديم <span class="tag">32-bit · shellcode</span></h3>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🥞</div><h4>stack من 8 registers</h4><p><code>st(0)…st(7)</code>، 80-bit لكل واحد. <code>fld</code> بتعمل push، <code>fstp</code> بتعمل pop وتخزّن، <code>fadd/fmul</code> على <code>st(0)</code>، <code>fild/fistp</code> للـ integers. في الـ 32-bit (cdecl) الـ float/double بيرجع في <code>st(0)</code> — هتشوفها كتير في الـ malware الـ 32-bit.</p></div>
+          <div class="card reveal"><div class="ico">🎯</div><h4>حيلة الـ GetPC في الـ shellcode</h4><p><code>fldz</code> ثم <code>fnstenv [esp-12]</code> ثم <code>pop ecx</code>: الـ FPU بيحفظ عنوان آخر instruction x87 اتنفذت، فالـ shellcode بيعرف هو فين في الذاكرة. ده توقيع مشهور لـ encoders زي <b>shikata_ga_nai</b>. لو شفت <code>fnstenv</code> في بداية buffer ← shellcode متشفّر.</p></div>
+        </div>
+
+        <h3 class="sub">Packed SIMD: 16 عملية في instruction واحدة</h3>
+        <div class="widget" data-widget="simd"></div>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Instruction</th><th>المعنى</th><th>هتشوفها فين</th></tr></thead>
+            <tbody>
+              <tr><td><code>movdqu / movups</code></td><td>تحميل/تخزين 16 byte (أي عنوان)</td><td>memcpy، نسخ structs</td></tr>
+              <tr><td><code>movdqa / movaps</code></td><td>نفس الكلام بس العنوان <b>لازم</b> يبقى مضاعف 16 وإلا <b>#GP crash</b></td><td>متغيرات الـ stack — وده سبب قاعدة rsp مضاعف 16</td></tr>
+              <tr><td><code>pxor / xorps</code></td><td>XOR لـ 128 bit</td><td>تصفير، decoders متجهة</td></tr>
+              <tr><td><code>paddb · psubb · paddd</code></td><td>جمع/طرح لكل lane لوحده</td><td>تشفير بسيط، checksums</td></tr>
+              <tr><td><code>pcmpeqb</code> + <code>pmovmskb</code></td><td>قارن 16 byte ← mask في register عادي</td><td>strlen / memchr / strcmp</td></tr>
+              <tr><td><code>pshufb · pshufd · punpcklbw</code></td><td>إعادة ترتيب/تكرار الـ bytes</td><td>broadcast للمفتاح، byte swap</td></tr>
+              <tr><td><code>aesenc · aesenclast · aesdec</code></td><td>جولة AES كاملة في الهاردوير</td><td>ransomware، crypto libraries</td></tr>
+              <tr><td><code>vpxor ymm0, ymm1, ymm2</code></td><td>AVX: 3 operands و32 byte (prefix <code>C5</code>/<code>C4</code> = VEX)</td><td>كود حديث، glibc</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <compiled file="vec_xor.c" targets="gcc-O2,msvc-O2" note="ده loop من سطرين، والـ compiler عمله 3 أجزاء: <b>(1) broadcast</b>: <code>movd</code> + <code>punpcklbw</code> + <code>punpcklwd</code> + <code>pshufd xmm1, xmm1, 0</code> = المفتاح متكرر 16 مرة. <b>(2) الـ vector body</b>: <code>movdqu</code> / <code>pxor</code> / <code>movups</code> وخطوة 16 (MSVC فرده 4 مرات = 64 byte في اللفة). <b>(3) الـ scalar tail</b>: نفس الـ <code>xor byte ptr</code> العادي للـ bytes الباقية. وظيفتك كـ reverser: <b>تلم الثلاثة في سطر واحد</b>: <code>buf[i] ^= key</code>.">
+void xor_buf(unsigned char *buf, unsigned long n, unsigned char key) {
+    for (unsigned long i = 0; i < n; i++)
+        buf[i] ^= key;
+}
+</compiled>
+
+        <h3 class="sub">Stack strings بالـ xmm: string متشفرة جوه الكود</h3>
+        <p>الـ malware بيخبّي الـ strings (الأوامر، الـ URLs، أسماء الـ APIs) عشان أداة <code>strings</code> متلاقيهاش. شوف نفس الكود C مع compilerين:</p>
+        <compiled file="enc_str.c" targets="msvc-O2,gcc-O2,gcc-O0" note="<b>MSVC</b>: 4 × <code>mov dword</code> بيبنوا الـ 16 byte المشفرة على الـ stack، وبعدين <code>xorps</code> مع ثابت اسمه <code>__xmm@5a5a…5a</code> — الاسم نفسه بيقولك المفتاح 0x5A! <b>gcc -O2</b>: حسب الـ XOR كله وقت الـ compile، والـ string الأصلية <code>powershell -nop</code> بقت في <code>.rodata</code> واضحة (112='p', 111='o'…) — يعني «التشفير» ده اتشال خالص. عشان كده الـ malware الحقيقي بيستخدم حيل تمنع الـ optimizer (volatile، مفاتيح وقت التشغيل). <b>gcc -O0</b>: <code>movabs</code> بقيم 64-bit = stack string، وloop بايت بايت.">
+void run(const char *cmd);
+
+void stage(void) {
+    unsigned char s[16] = { 0x2A, 0x35, 0x2D, 0x3F, 0x28, 0x29, 0x32, 0x3F,
+                            0x36, 0x36, 0x7A, 0x77, 0x34, 0x35, 0x2A, 0x5A };
+    for (int i = 0; i < 16; i++)
+        s[i] ^= 0x5A;                  /* decrypt the hidden command */
+    run((const char *)s);
+}
+</compiled>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>طريقة فك الـ stack strings بسرعة</strong><p>(1) في IDA: اضغط <kbd>R</kbd> على الثابت عشان يتعرض كحروف، أو اعمل الـ array كـ <code>char[16]</code>. (2) في x64dbg: حط breakpoint <b>بعد</b> الـ <code>xorps</code>/<code>movdqu</code> وبص على الـ stack (ده الأسرع: خلّي البرنامج يفك لك). (3) أدوات زي <b>FLOSS</b> بتعمل emulation وتطلع الـ stack strings والـ strings المشفرة أوتوماتيك. (4) يدويًا: كل dword little-endian ← bytes ← XOR.</p></div></div>
+
+        <compiled file="zero_struct.c" targets="gcc-O2,msvc-O2" note="<code>= {0}</code> بقت <code>pxor xmm0, xmm0</code> + كام <code>movups</code>، والنسخ <code>*dst = *src</code> بقى أزواج <code>movdqu</code>/<code>movups</code>. لاحظ الحجم: على gcc الـ struct = 64 byte (4 × long 8) وعلى MSVC = 48 (long = 4) — فالـ offsets بتختلف بين Linux وWindows لنفس الكود! وMSVC حط <b>security cookie</b> لأن الـ struct فيه array.">
+struct session { long id, flags, sock, pid; char host[32]; };
+void use(struct session *s);
+
+void open_session(void) {
+    struct session s = {0};          /* 64 zero bytes */
+    s.id = 7;
+    use(&s);
+}
+
+void clone(struct session *dst, const struct session *src) { *dst = *src; }
+</compiled>
+
+        <div class="callout info"><span class="ci">📘</span><div><strong>الـ floats في الـ calling conventions</strong><p><b>System V</b>: أول 8 floats/doubles في <code>xmm0–xmm7</code> (مستقلة عن الـ integers)، وكل الـ xmm volatile، و<code>al</code> = عدد الـ xmm قبل الـ varargs. <b>Windows x64</b>: <b>بالمكان</b>: <code>f(int a, double b)</code> ← a في <code>ecx</code> وb في <code>xmm1</code> (مش xmm0!)، والـ varargs بتتنسخ في الـ integer register كمان، و<b><code>xmm6–xmm15</code> non-volatile</b> — عشان كده هتلاقي <code>movaps [rsp+…], xmm6</code> في prologue دوال Windows. الـ return دايمًا في <code>xmm0</code>.</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 16</h3></div>
+
+          <quiz id="s16-q1" answer="2">
+            <q><code>cvttsd2si eax, xmm0</code> و<code>xmm0 = -2.7</code>. قيمة <code>eax</code>؟</q>
+            <o>-3</o>
+            <o>3</o>
+            <o>-2</o>
+            <o>0xFFFFFFFF</o>
+            <good>الـ t = truncate = تقريب ناحية الصفر، زي <code>(int)x</code> في C. (<code>cvtsd2si</code> من غير t بيستخدم وضع التقريب الحالي = لأقرب رقم.)</good>
+            <bad>الـ t الزيادة في الاسم معناها إيه؟</bad>
+          </quiz>
+          <quiz id="s16-q2" answer="0">
+            <q>بعد <code>ucomisd xmm0, xmm1</code> و<code>xmm0 = NaN</code>، أنهي jump هتتنفذ؟</q>
+            <o><code>je</code> — لأن ZF=1</o>
+            <o><code>ja</code></o>
+            <o><code>jne</code></o>
+            <o>ولا واحدة</o>
+            <good>unordered ← ZF=PF=CF=1. عشان كده الـ compiler بيحط <code>jp</code> قبل <code>je</code>/<code>jne</code> في مقارنات المساواة.</good>
+            <bad>NaN بيخلي ZF وPF وCF كلهم = 1.</bad>
+          </quiz>
+          <quiz id="s16-q3" answer="3">
+            <q>برنامج عمل crash على <code>movaps XMMWORD PTR [rsp+0x10], xmm0</code> جوه <code>printf</code>. السبب الأرجح؟</q>
+            <o>xmm0 فيه NaN</o>
+            <o>printf مش موجودة</o>
+            <o>الـ CPU مبيدعمش SSE</o>
+            <o>الـ stack مكانش aligned على 16 قبل الـ call، و<code>movaps</code> بتطلب عنوان مضاعف 16</o>
+            <good>ده أشهر crash لما تكتب Assembly بتنادي libc أو WinAPI: rsp لازم يبقى مضاعف 16 لحظة الـ <code>call</code>.</good>
+            <bad>الـ a في movaps = aligned.</bad>
+          </quiz>
+          <quiz id="s16-q4" answer="1">
+            <q>Windows x64: <code>void f(int a, double b, int c)</code>. الـ <code>c</code> بتتبعت في:</q>
+            <o><code>edx</code></o>
+            <o><code>r8d</code> — المكان التالت</o>
+            <o><code>xmm2</code></o>
+            <o>على الـ stack</o>
+            <good>في Windows كل argument ليه «خانة» بالترتيب: rcx/xmm0، rdx/xmm1، r8/xmm2، r9/xmm3. الـ c في الخانة التالتة وهو int ← r8d. (في System V كانت هتبقى في esi لأن الـ integers والـ floats بيتعدّوا كل نوع لوحده.)</good>
+            <bad>Windows بيعدّ الخانات بالمكان مش بالنوع.</bad>
+          </quiz>
+          <quiz id="s16-q5" answer="2">
+            <q>في sample لقيت loop فيها <code>aesenc</code> 9 مرات وبعدين <code>aesenclast</code>. ده غالبًا:</q>
+            <o>anti-debug</o>
+            <o>ضغط بيانات</o>
+            <o>تشفير AES-128 بالهاردوير (10 جولات) — دوّر على الـ key schedule (<code>aeskeygenassist</code>) والمفتاح</o>
+            <o>hashing بـ MD5</o>
+            <good>AES-128 = 10 rounds، ‏AES-256 = 14. وجود AES-NI في sample = تشفير حقيقي (ransomware، تشفير الاتصال بالـ C2).</good>
+            <bad>aes في الاسم…</bad>
+          </quiz>
+          <quiz id="s16-q6" answer="1">
+            <q><code>pcmpeqb xmm0, xmm1</code> (xmm1 = أصفار) ثم <code>pmovmskb eax, xmm0</code> ثم <code>bsf eax, eax</code>. الكود ده بيحسب:</q>
+            <o>مجموع الـ bytes</o>
+            <o>مكان أول byte = 0 في الـ 16 byte — يعني جزء من strlen</o>
+            <o>عدد الأصفار</o>
+            <o>XOR للـ buffer</o>
+            <good>بالظبط اللي جربته في أداة الـ SIMD: الـ mask فيه bit لكل byte صفر، وbsf بيجيب أول واحد.</good>
+            <bad>جرّب اختيار pcmpeqb + pmovmskb في أداة الـ SIMD فوق.</bad>
+          </quiz>
+          <quiz id="s16-q7" answer="0">
+            <q>32-bit (cdecl): دالة بترجع <code>double</code>. الـ caller هيلاقي النتيجة فين؟</q>
+            <o><code>st(0)</code> — أعلى الـ x87 stack</o>
+            <o><code>edx:eax</code></o>
+            <o><code>xmm0</code></o>
+            <o>على الـ stack</o>
+            <good>الـ 32-bit ABIs قبل SSE: الـ floats بترجع في st(0)، فهتشوف <code>fstp qword [ebp-8]</code> بعد الـ call.</good>
+            <bad>الـ 32-bit اتصممت قبل SSE…</bad>
+          </quiz>
+
+          <challenge id="s16-c1" title="Celsius ← Fahrenheit بالـ SSE" level="2" io>
+            <desc>عندك 4 درجات حرارة <code>double</code> في <code>temps</code>. لكل واحدة احسب <code>F = C × 9 / 5 + 32</code> بـ SSE واطبعها كـ integer (truncate بـ <code>cvttsd2si</code>) في سطر لوحدها:<br><code>-40</code><br><code>32</code><br><code>97</code><br><code>212</code></desc>
+            <starter>
+default rel
+section .data
+temps:  dq -40.0, 0.0, 36.6, 100.0
+nine:   dq 9.0
+five:   dq 5.0
+k32:    dq 32.0
+
+section .text
+global _start
+_start:
+    xor ebx, ebx                ; index
+    ; TODO: loop over the 4 temperatures
+
+    xor edi, edi
+    call exit
+</starter>
+            <expected>
+-40
+32
+97
+212
+</expected>
+            <solution>
+default rel
+section .data
+temps:  dq -40.0, 0.0, 36.6, 100.0
+nine:   dq 9.0
+five:   dq 5.0
+k32:    dq 32.0
+
+section .text
+global _start
+_start:
+    xor ebx, ebx                ; index
+    lea rsi, [temps]
+.next:
+    movsd xmm0, [rsi + rbx*8]   ; C
+    mulsd xmm0, [nine]
+    divsd xmm0, [five]
+    addsd xmm0, [k32]           ; F
+    cvttsd2si rdi, xmm0         ; 97.88 -> 97 (truncate)
+    call print_int
+    call print_nl
+    inc ebx
+    cmp ebx, 4
+    jb .next
+
+    xor edi, edi
+    call exit
+</solution>
+          </challenge>
+
+          <re-task id="s16-re1" title="ثابت الـ .rodata" level="1" answer="60" norm="int">
+            <desc>gcc طلّع:<br><code>comisd xmm0, QWORD PTR .LC3[rip]</code> / <code>ja .L9</code><br>و<code>.LC3: .long 0</code> / <code>.long 1078853632</code>.<br>الدالة بتقارن <code>xmm0</code> بأنهي رقم؟ (اكتب الرقم العشري)</desc>
+            <hint>low dword = 0، high dword = 1078853632 = 0x404E0000. الـ double = 0x404E000000000000. جرّب أداة ucomisd فوق: اكتب أرقام لحد ما تطلع نفس الـ .long.</hint>
+            <explain>0x404E0000_00000000: الـ sign = 0، الـ exponent = 0x404 − 1023 = 5، والـ mantissa = 1.875 ← 1.875 × 2⁵ = <b>60.0</b>. وفي الواقع: كتير من الـ samples بتقارن الوقت المنقضي بثابت double (sandbox evasion بالـ timing).</explain>
+          </re-task>
+
+          <re-task id="s16-re2" title="فك stack string متجهة" level="2" answer="VirtualAllocEx" norm="str">
+            <desc>MSVC طلّع الكود ده. أنهي string اتفكت قبل <code>call rbx</code>؟ (من غير الـ NUL)
+            </desc>
+            <listing>
+movdqa  xmm1, XMMWORD PTR __xmm@37373737373737373737373737373737
+lea     rcx, QWORD PTR s$[rsp]
+mov     DWORD PTR s$[rsp], 1128619617        ; 43455e61H
+mov     DWORD PTR s$[rsp+4], 1985697346      ; 765b5642H
+mov     DWORD PTR s$[rsp+8], 1415076699      ; 54585b5bH
+mov     DWORD PTR s$[rsp+12], 926371698      ; 37374f72H
+movdqu  xmm0, XMMWORD PTR s$[rsp]
+xorps   xmm1, xmm0
+movdqu  XMMWORD PTR s$[rsp], xmm1
+call    rbx                                  ; GetProcAddress-like resolver
+</listing>
+            <hint>المفتاح 0x37 (من اسم الثابت). أول dword 0x43455E61 في الذاكرة: 61 5E 45 43. 0x61 ^ 0x37 = 0x56 = 'V'.</hint>
+            <explain>الـ bytes: 61 5E 45 43 42 56 5B 76 5B 5B 58 54 72 4F 37 37 ← XOR 0x37 ← <code>VirtualAllocEx\0\0</code>. اسم API بيتفك وقت التشغيل وبيتعمله resolve ديناميكي = محاولة إخفاء الـ imports. <code>VirtualAllocEx</code> (تخصيص ذاكرة في process تانية) = أول خطوة في الـ <b>process injection</b>.</explain>
+          </re-task>
+        </div>
+      </section>

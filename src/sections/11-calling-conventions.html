@@ -1,0 +1,252 @@
+      <section class="section" id="s11" data-part="الجزء 2 · الـ Instructions بالتفصيل" data-nav="الـ Calling Conventions" data-icon="🤝" data-keywords="calling convention abi system v microsoft x64 shadow space home space cdecl stdcall fastcall thiscall arguments volatile nonvolatile callee saved caller saved varargs name decoration ret n">
+        <div class="section-head">
+          <span class="section-index">11</span>
+          <div>
+            <p class="eyebrow">المرحلة الحادية عشر · العقد بين الدوال</p>
+            <h2>الـ Calling Conventions: مين بيحط إيه وفين</h2>
+            <p class="lede">عشان دالتين اتكتبوا بـ compilers مختلفة يشتغلوا مع بعض، لازم يتفقوا: الـ arguments بتتحط فين؟ النتيجة بترجع فين؟ مين بينضف الـ stack؟ مين مسؤول عن حفظ أنهي registers؟ الاتفاق ده اسمه <b>calling convention</b>. ومعرفته أسرع طريقة تعرف بيها <b>عدد وقيم الـ arguments</b> لأي دالة في الـ disassembly — وتفهم أي <code>call</code> لـ Windows API.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">x64: النظامين الأساسيين <span class="tag">System V vs Microsoft</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th></th><th>System V AMD64 (Linux / macOS)</th><th>Microsoft x64 (Windows)</th></tr></thead>
+            <tbody>
+              <tr><td><b>الـ args الصحيحة</b></td><td><code>rdi, rsi, rdx, rcx, r8, r9</code> (6)</td><td><code>rcx, rdx, r8, r9</code> (4)</td></tr>
+              <tr><td><b>الـ floats/doubles</b></td><td><code>xmm0–xmm7</code></td><td><code>xmm0–xmm3</code> (نفس رقم الخانة: الـ arg التاني double = xmm1)</td></tr>
+              <tr><td><b>الباقي</b></td><td>على الـ stack فوق عنوان الرجوع</td><td>على الـ stack فوق الـ shadow space: <code>[rsp+20h]</code>، <code>[rsp+28h]</code>… (قبل الـ call)</td></tr>
+              <tr><td><b>القيمة الراجعة</b></td><td><code>rax</code> (و<code>rdx</code> للـ 128-bit)، <code>xmm0</code> للـ float</td><td><code>rax</code>، <code>xmm0</code>؛ الـ struct الكبيرة بـ pointer مخفي في <code>rcx</code></td></tr>
+              <tr><td><b>Callee-saved</b> (لازم تفضل زي ما هي)</td><td><code>rbx, rbp, r12–r15</code></td><td><code>rbx, rbp, rdi, rsi, r12–r15, xmm6–xmm15</code></td></tr>
+              <tr><td><b>Volatile</b> (ممكن تتبوّظ بعد أي call)</td><td><code>rax, rcx, rdx, rsi, rdi, r8–r11</code></td><td><code>rax, rcx, rdx, r8–r11, xmm0–xmm5</code></td></tr>
+              <tr><td><b>مساحة خاصة</b></td><td>Red zone: 128 byte تحت rsp</td><td>Shadow space: 32 byte لازم الـ caller يحجزها</td></tr>
+              <tr><td><b>Alignment</b></td><td colspan="2">rsp مضاعف 16 قبل الـ call</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn"><span class="ci">⚠️</span><div><strong>rdi وrsi: الفرق الأخطر</strong><p>على Linux <code>rdi</code>/<code>rsi</code> أول argumentين (volatile). على Windows هما <b>callee-saved</b>! لو نقلت كود Assembly من Linux لـ Windows ونسيت تحفظهم — الـ caller هيتلخبط بشكل عشوائي. وفي التحليل: لو شفت دالة Windows بتعمل <code>push rdi</code>/<code>push rsi</code> في أولها، ده حفظ registers، مش arguments.</p></div></div>
+
+        <h3 class="sub">Windows x64 متحرك <span class="tag">🎬 scene</span></h3>
+        <div class="explorer" data-scene="win64"></div>
+
+        <h3 class="sub">نفس الـ call على 4 منصات <span class="tag">real compilers</span></h3>
+        <p>دالة بـ 7 arguments: شوف كل platform بيوزّعهم إزاي. ده بالظبط اللي محتاج تعمله في التحليل — <b>اعرف الـ args من الـ setup اللي قبل الـ call</b>:</p>
+        <compiled file="args7.c" targets="gcc-O2,msvc-O2,gcc32-O2,msvc32-O2" note="<b>gcc x64</b>: 6 في registers والسابع بـ <code>push 7</code>، والـ caller بينضف بعد الـ call. <b>MSVC x64</b>: أربعة في rcx/rdx/r8/r9 والباقي في <code>[rsp+32]</code> و<code>[rsp+40]</code> و<code>[rsp+48]</code> (الـ 32 byte الأولى shadow space)، وكل حاجة 32-bit لأن long = 4 bytes. <b>32-bit</b>: كله <code>push</code> من <b>اليمين للشمال</b> (عشان أول argument يبقى أقرب للـ return address)، والـ caller بيعمل <code>add esp, 28</code> = 7×4 (cdecl).">
+long sum7(long a, long b, long c, long d, long e, long f, long g);
+
+long caller(void) {
+    return sum7(1, 2, 3, 4, 5, 6, 7) + 100;
+}
+</compiled>
+
+        <h3 class="sub">x86 32-bit: عيلة كاملة من الـ conventions <span class="tag">malware 32-bit كتير!</span></h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Convention</th><th>الـ args</th><th>مين بينضف الـ stack</th><th>بتعرفها إزاي</th><th>فين</th></tr></thead>
+            <tbody>
+              <tr><td><code>cdecl</code></td><td>stack (يمين ← شمال)</td><td><b>الـ caller</b>: <code>add esp, N</code> بعد الـ call</td><td><code>ret</code> عادية + <code>add esp</code> بعد الـ call</td><td>C الافتراضي، <code>printf</code> (varargs لازم cdecl)</td></tr>
+              <tr><td><code>stdcall</code></td><td>stack (يمين ← شمال)</td><td><b>الـ callee</b>: <code>ret N</code></td><td><code>ret 8</code> / <code>ret 0Ch</code>… وN/4 = عدد الـ args</td><td><b>كل الـ Windows API</b> (WINAPI)</td></tr>
+              <tr><td><code>fastcall</code> (MS)</td><td><code>ecx</code>، <code>edx</code>، والباقي stack</td><td>الـ callee</td><td>استخدام ecx/edx قبل ما يتكتبوا</td><td>كود Windows داخلي، بعض الـ malware</td></tr>
+              <tr><td><code>thiscall</code></td><td><code>ecx</code> = <code>this</code>، الباقي stack</td><td>الـ callee</td><td><code>mov ecx, obj</code> قبل call method</td><td>C++ methods في MSVC</td></tr>
+              <tr><td>Delphi <code>register</code></td><td><code>eax</code>، <code>edx</code>، <code>ecx</code></td><td>الـ callee</td><td>eax كـ argument (!)</td><td>برامج Delphi (malware برازيلي كتير)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <compiled file="conv32.c" targets="msvc32-O2" note="لاحظ الـ <b>name decoration</b> بتاعة MSVC 32-bit: <code>_add_cdecl</code>، <code>_add_std@8</code> (الـ @8 = 8 bytes arguments)، <code>@add_fast@8</code>. الـ stdcall خلصت بـ <code>ret 8</code> (بتشيل الـ argumentين بنفسها)، والـ fastcall أخدت الـ args من <code>ecx</code> و<code>edx</code>. والدالة <code>use</code>؟ الـ compiler حسبها كلها وقت الـ compile: 3 + 7 + 11 = <code>21</code>!">
+int __stdcall  add_std(int a, int b)   { return a + b; }
+int __cdecl    add_cdecl(int a, int b) { return a + b; }
+int __fastcall add_fast(int a, int b)  { return a + b; }
+
+int use(void) {
+    return add_std(1, 2) + add_cdecl(3, 4) + add_fast(5, 6);
+}
+</compiled>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>قراية API call في x64dbg / IDA</strong><p>قبل <code>call qword ptr [__imp_CreateFileW]</code> هتلاقي: <code>rcx</code> = اسم الملف، <code>edx</code> = access، <code>r8d</code> = share mode، <code>r9</code> = security attributes، و<code>[rsp+20h]</code> = creation disposition… افتح الـ prototype في MSDN ورتّب. x64dbg (مع xAnalyzer) وIDA بيكتبوا الأسماء دي جنب السطور أوتوماتيك. وفي 32-bit: الـ pushes اللي قبل الـ call بالعكس — آخر push = أول argument.</p></div></div>
+
+        <h3 class="sub">Varargs: <code>printf</code> و<code>al</code> <span class="tag">System V detail</span></h3>
+        <compiled file="varargs.c" targets="gcc-O2" note="<code>mov eax, 1</code> قبل نداء دالة variadic على Linux = <b>عدد الـ xmm registers</b> المستخدمة في الـ args (هنا double واحد في xmm0). ولو مفيش floats: <code>xor eax, eax</code> — هتشوفها قبل كل <code>printf</code> تقريبًا. و<code>jmp printf</code> بدل <code>call</code> = <b>tail call</b>: الدالة خلصت شغلها وبتسيب printf ترجع للـ caller بتاعها مباشرة.">
+#include <stdio.h>
+void report(int n, double ratio) {
+    printf("n=%d ratio=%f\n", n, ratio);
+}
+</compiled>
+
+        <h3 class="sub">إزاي تعرف عدد الـ arguments لأي دالة <span class="tag">RE workflow</span></h3>
+        <div class="steps">
+          <div class="step"><span class="n">01</span><div><h4>بص على الـ callee</h4><p>أي register من registers الـ args بيتقري <b>قبل</b> ما يتكتب فيه = argument. (Linux: rdi, rsi, rdx, rcx, r8, r9 بالترتيب؛ Windows: rcx, rdx, r8, r9، وبعدها <code>[rsp+28h]</code>… عند الدخول).</p></div></div>
+          <div class="step"><span class="n">02</span><div><h4>بص على الـ callers</h4><p>كل الأماكن اللي بتنادي الدالة (xrefs — <kbd>X</kbd> في IDA): إيه اللي بيتحط في الـ registers والـ stack قبل الـ call. لو registers زيادة بتتظبط وملهاش استخدام — مش args.</p></div></div>
+          <div class="step"><span class="n">03</span><div><h4>في 32-bit: <code>ret N</code> و<code>add esp, N</code></h4><p><code>ret 0Ch</code> = stdcall بـ 3 args. ولو <code>ret</code> عادية وبعد الـ call <code>add esp, 10h</code> = cdecl بـ 4 args.</p></div></div>
+          <div class="step"><span class="n">04</span><div><h4>اتأكد من الـ return value</h4><p>بعد الـ call: الـ caller بيستخدم <code>eax</code>/<code>rax</code>؟ (<code>test eax, eax</code> مثلًا) يبقى الدالة بترجع حاجة. لو بيكتب في <code>rax</code> قبل ما يقراه — void.</p></div></div>
+        </div>
+
+        <h3 class="sub">اكتب دالة بتحترم الـ ABI <span class="tag">LAB</span></h3>
+        <p>المعمل ده فيه <code>helper</code> بتتصرف زي دالة حقيقية: بتبوّظ كل الـ volatile registers (Linux). شوف إزاي <code>compute</code> بتحافظ على قيمة محتاجاها بعد الـ call — بتحطها في <code>rbx</code> (callee-saved) وبتحفظ <code>rbx</code> القديم:</p>
+        <asm-lab id="s11-lab1" title="volatile vs callee-saved" setup="rdi=6;rsi=7;rdx=100;rbx=0xBEEF" expect="rax=142;rbx=0xBEEF">
+compute:                    ; return (a * b) + c   (a=rdi, b=rsi, c=rdx)
+    push rbx                ; rbx is callee-saved: keep the caller's value
+    mov rbx, rdx            ; c must survive the call -> keep it in rbx
+    call helper             ; rax = a * b   (destroys rcx rdx rsi rdi r8-r11)
+    add rax, rbx            ; + c
+    pop rbx
+    ret
+helper:                     ; behaves like a real ABI function
+    mov rax, rdi
+    imul rax, rsi
+    mov rcx, -1             ; trash every volatile register
+    mov rdx, -1
+    mov rsi, -1
+    mov rdi, -1
+    mov r8, -1
+    mov r9, -1
+    mov r10, -1
+    mov r11, -1
+    ret
+</asm-lab>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 11</h3></div>
+
+          <quiz id="s11-q1" answer="1">
+            <q>على Windows x64، الـ argument التالت لأي دالة بيتحط في:</q>
+            <o><code>rdx</code></o>
+            <o><code>r8</code></o>
+            <o><code>rdi</code></o>
+            <o><code>[rsp+20h]</code></o>
+            <good>rcx, rdx, <b>r8</b>, r9.</good>
+            <bad>Windows: rcx, rdx, ثم…</bad>
+          </quiz>
+          <quiz id="s11-q2" answer="3">
+            <q>دالة 32-bit بتخلص بـ <code>ret 10h</code>. نوعها وعدد الـ args (كلها 4 bytes)؟</q>
+            <o>cdecl، 16</o>
+            <o>stdcall، 16</o>
+            <o>cdecl، 4</o>
+            <o>stdcall، 4</o>
+            <good>ret N = الـ callee بيشيل الـ args = stdcall. 0x10 = 16 byte = 4 args. ده شكل أي WinAPI زي <code>MessageBoxA</code> (4 args).</good>
+            <bad>مين اللي بينضف لما يبقى فيه رقم بعد ret؟ و0x10 بالـ decimal كام؟</bad>
+          </quiz>
+          <quiz id="s11-q3" answer="0">
+            <q>على Linux، بعد <code>call some_function</code>، أنهي register مضمون إنه لسه بقيمته القديمة؟</q>
+            <o><code>rbx</code></o>
+            <o><code>rcx</code></o>
+            <o><code>rdi</code></o>
+            <o><code>r11</code></o>
+            <good>rbx, rbp, r12–r15 callee-saved. الباقي volatile — ممكن يتبوّظ.</good>
+            <bad>دوّر على الـ callee-saved في جدول System V.</bad>
+          </quiz>
+          <quiz id="s11-q4" answer="2">
+            <q>دالة Windows x64 لسه داخلة (من غير أي push أو sub) وبتقرا <code>[rsp+30h]</code>. ده الـ argument رقم كام؟</q>
+            <o>3</o>
+            <o>5</o>
+            <o>6</o>
+            <o>مش argument</o>
+            <good>عند الدخول: [rsp] = return، [rsp+8..+20h] = shadow (args 1-4)، [rsp+28h] = arg5، [rsp+30h] = <b>arg6</b>.</good>
+            <bad>عدّ: return address (8) + shadow (32) = 40 = 0x28 → arg5. وكل arg بعده +8.</bad>
+          </quiz>
+          <quiz id="s11-q5" answer="1">
+            <q><code>xor eax, eax</code> قبل <code>call printf</code> على Linux معناها:</q>
+            <o>printf هترجع صفر</o>
+            <o>مفيش أي argument في registers الـ xmm (عدد الـ vector args = 0)</o>
+            <o>الـ format string فاضية</o>
+            <o>تصفير الـ return value</o>
+            <good>للدوال الـ variadic في System V، al = عدد registers الـ xmm المستخدمة.</good>
+            <bad>افتكر مثال varargs.c.</bad>
+          </quiz>
+          <quiz id="s11-q6" answer="3">
+            <q>في MSVC 32-bit لقيت دالة اسمها <code>@Decrypt@12</code>. ده:</q>
+            <o>cdecl بـ 12 argument</o>
+            <o>stdcall بـ 3 arguments</o>
+            <o>C++ method</o>
+            <o>fastcall بـ 12 byte arguments (أول اتنين في ecx وedx)</o>
+            <good>الـ @ في الأول = fastcall، والـ @12 = حجم الـ args بالـ bytes (3 args من 4 bytes: 2 في registers وواحد على الـ stack).</good>
+            <bad>الـ decoration: <code>_name</code> = cdecl، <code>_name@N</code> = stdcall، <code>@name@N</code> = ?</bad>
+          </quiz>
+          <quiz id="s11-q7" answer="0">
+            <q>في 32-bit: <code>push 0</code> / <code>push offset caption</code> / <code>push offset text</code> / <code>push 0</code> / <code>call MessageBoxA</code>. الـ <code>hWnd</code> (أول argument) قيمته:</q>
+            <o>0 (آخر push)</o>
+            <o>0 (أول push)</o>
+            <o>text</o>
+            <o>caption</o>
+            <good>الـ args بتتعمل push من اليمين للشمال، فآخر push = أول argument: MessageBoxA(hWnd=0, lpText=text, lpCaption=caption, uType=0).</good>
+            <bad>يمين ← شمال: الـ push الأخير هو الـ argument الأول.</bad>
+          </quiz>
+          <quiz id="s11-q8" answer="2">
+            <q>في method C++ متكومبايلة بـ MSVC 32-bit لقيت <code>mov eax, [ecx+8]</code> أول سطر. <code>ecx</code> هنا غالبًا:</q>
+            <o>عدّاد loop</o>
+            <o>argument عادي</o>
+            <o><code>this</code> (thiscall) — والسطر بيقرا field عند offset 8 في الـ object</o>
+            <o>الـ return value</o>
+            <good>thiscall: this في ecx. على x64 (Windows) this بيبقى في rcx لأنه أول argument.</good>
+            <bad>C++ methods في MSVC 32-bit ليها convention خاص.</bad>
+          </quiz>
+
+          <lab-challenge id="s11-lc1" title="نادِ دالة volatile صح" level="2">
+            <desc>اكتب <code>calc</code>: بترجع <code>sq(a) + sq(b)</code> حيث a في <code>rdi</code> وb في <code>rsi</code>. الدالة <code>sq</code> جاهزة (بترجع <code>rdi*rdi</code> في <code>rax</code>) <b>وبتبوّظ كل الـ volatile registers</b> زي أي دالة حقيقية. لازم تحتفظ بـ <code>b</code> والنتيجة الوسيطة في registers آمنة، وتحافظ على أي callee-saved بتستخدمه. (والـ stack لازم يفضل متوازن!)</desc>
+            <starter>
+calc:
+    call sq             ; sq(a) ... but b in rsi gets destroyed!
+    ret
+
+sq:                     ; rax = rdi * rdi, trashes volatile registers
+    mov rax, rdi
+    imul rax, rdi
+    mov rcx, -1
+    mov rdx, -1
+    mov rsi, -1
+    mov rdi, -1
+    mov r8, -1
+    mov r9, -1
+    mov r10, -1
+    mov r11, -1
+    ret
+</starter>
+            <solution>
+calc:
+    push rbx
+    push r12
+    mov rbx, rsi        ; keep b safe
+    call sq             ; rax = a*a
+    mov r12, rax        ; keep the partial result safe
+    mov rdi, rbx
+    call sq             ; rax = b*b
+    add rax, r12
+    pop r12
+    pop rbx
+    ret
+
+sq:                     ; rax = rdi * rdi, trashes volatile registers
+    mov rax, rdi
+    imul rax, rdi
+    mov rcx, -1
+    mov rdx, -1
+    mov rsi, -1
+    mov rdi, -1
+    mov r8, -1
+    mov r9, -1
+    mov r10, -1
+    mov r11, -1
+    ret
+</solution>
+            <test setup="rdi=3;rsi=4;rbx=11;r12=22" expect="rax=25;rbx=11;r12=22"/>
+            <test setup="rdi=-5;rsi=12;rbx=1;r12=2" expect="rax=169;rbx=1;r12=2"/>
+          </lab-challenge>
+
+          <re-task id="s11-re1" title="كام argument؟" level="2" answer="3" norm="int">
+            <desc>دالة Linux x64 (gcc). بتاخد كام argument؟</desc>
+            <listing>
+mystery:
+    lea eax, [rdi+rsi]
+    imul eax, edx
+    mov ecx, 10
+    sub eax, ecx
+    ret
+</listing>
+            <hint>دوّر على registers الـ args اللي بتتقري قبل ما تتكتب. rcx هنا اتكتب الأول.</hint>
+            <explain>اتقري <code>rdi</code> و<code>rsi</code> و<code>edx</code> قبل الكتابة ← 3 args. أما <code>ecx</code> فاتكتب فيه (<code>mov ecx, 10</code>) قبل استخدامه ← متغير مؤقت مش argument. الدالة: <code>int mystery(int a, int b, int c) { return (a + b) * c - 10; }</code>.</explain>
+          </re-task>
+          <re-task id="s11-re2" title="ارجع للـ API" level="2" answer="CreateRemoteThread" norm="text">
+            <desc>sample 32-bit فيه دالة اسمها مش ظاهر (resolved dynamically) اتنادت كده: 7 pushes قبلها ومفيش <code>add esp</code> بعدها، والـ arguments (من أول argument): handle لـ process تاني، NULL، 0، عنوان في الـ process التاني، pointer، 0، pointer لـ DWORD. أشهر WinAPI بالشكل ده بتستخدم في الـ injection؟</desc>
+            <hint>stdcall بـ 7 args، وأول argument handle لـ process تاني، والرابع عنوان بداية تنفيذ…</hint>
+            <explain><code>CreateRemoteThread(hProcess, lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter, dwCreationFlags, lpThreadId)</code> — 7 args، stdcall (مفيش تنضيف من الـ caller). الـ <code>lpStartAddress</code> في الـ process التاني = غالبًا shellcode اتكتب بـ <code>WriteProcessMemory</code>. ده آخر خطوة في الـ classic injection (هنشوفها متحركة في مرحلة الـ shellcode).</explain>
+          </re-task>
+        </div>
+      </section>

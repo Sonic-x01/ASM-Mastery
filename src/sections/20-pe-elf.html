@@ -1,0 +1,199 @@
+      <section class="section" id="s20" data-part="الجزء 4 · الهندسة العكسية" data-nav="PE وELF" data-icon="🗂️" data-keywords="pe portable executable dos header mz e_lfanew nt headers file header optional header data directory section table rva va file offset image base import address table iat ilt export table resources overlay tls relocation rich header debug pdb packer upx entropy elf program header section plt got lazy binding readelf">
+        <div class="section-head">
+          <span class="section-index">20</span>
+          <div>
+            <p class="eyebrow">المرحلة العشرين · الملف قبل الكود</p>
+            <h2>صيغة PE (وELF): تشريح الملف التنفيذي</h2>
+            <p class="lede">قبل ما تقرا instruction واحدة، الـ header بيقولك حاجات كتير: 32 ولا 64، EXE ولا DLL، بيستورد إيه من APIs، فيه sections غريبة؟ packed؟ مكتوب إمتى؟ وكمان الـ malware نفسه بيقرا الـ PE headers وهو شغال (reflective loading، البحث عن APIs في الذاكرة). المرحلة دي هتشرّح ملف EXE حقيقي byte byte.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الملف على الـ disk ≠ الصورة في الذاكرة</h3>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 430" role="img" aria-label="PE file layout vs memory layout">
+            <defs><marker id="s20ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>
+            <text x="190" y="26" text-anchor="middle" class="d-tb">On disk  (FileAlignment 0x200)</text>
+            <text x="790" y="26" text-anchor="middle" class="d-tb">In memory  (SectionAlignment 0x1000)</text>
+            <rect x="80" y="40" width="220" height="70" rx="8" class="d-box2"/><text x="190" y="66" text-anchor="middle" class="d-t">DOS · PE · Section table</text><text x="190" y="88" text-anchor="middle" class="d-tx">0x000 – 0x3FF</text>
+            <rect x="80" y="114" width="220" height="44" rx="8" class="d-box4"/><text x="190" y="141" text-anchor="middle" class="d-t">.text   @0x400</text>
+            <rect x="80" y="162" width="220" height="44" rx="8" class="d-box"/><text x="190" y="189" text-anchor="middle" class="d-t">.rdata  @0x600</text>
+            <rect x="80" y="210" width="220" height="44" rx="8" class="d-box5"/><text x="190" y="237" text-anchor="middle" class="d-t">.idata  @0x800</text>
+            <text x="190" y="280" text-anchor="middle" class="d-tx">EOF = 0xA00  (2560 bytes)</text>
+            <text x="190" y="304" text-anchor="middle" class="d-tx">.bss: 0 bytes on disk</text>
+            <rect x="680" y="40" width="220" height="60" rx="8" class="d-box2"/><text x="790" y="66" text-anchor="middle" class="d-t">headers</text><text x="790" y="86" text-anchor="middle" class="d-tx">0x140000000  (RVA 0)</text>
+            <rect x="680" y="110" width="220" height="56" rx="8" class="d-box4"/><text x="790" y="134" text-anchor="middle" class="d-t">.text   RVA 0x1000</text><text x="790" y="154" text-anchor="middle" class="d-tx">R-X</text>
+            <rect x="680" y="176" width="220" height="56" rx="8" class="d-box"/><text x="790" y="200" text-anchor="middle" class="d-t">.rdata  RVA 0x2000</text><text x="790" y="220" text-anchor="middle" class="d-tx">R--</text>
+            <rect x="680" y="242" width="220" height="56" rx="8" class="d-box3"/><text x="790" y="266" text-anchor="middle" class="d-t">.bss    RVA 0x3000</text><text x="790" y="286" text-anchor="middle" class="d-tx">RW-  (zero-filled)</text>
+            <rect x="680" y="308" width="220" height="56" rx="8" class="d-box5"/><text x="790" y="332" text-anchor="middle" class="d-t">.idata  RVA 0x4000</text><text x="790" y="352" text-anchor="middle" class="d-tx">R--  (IAT gets written)</text>
+            <path d="M300 75 C 490 75, 490 70, 678 70" class="d-ar" marker-end="url(#s20ah)"/>
+            <path d="M300 136 C 490 136, 490 138, 678 138" class="d-ar-acc d-flow" marker-end="url(#s20ah)"/>
+            <path d="M300 184 C 490 184, 490 204, 678 204" class="d-ar" marker-end="url(#s20ah)"/>
+            <path d="M300 232 C 490 232, 490 336, 678 336" class="d-ar" marker-end="url(#s20ah)"/>
+            <text x="490" y="122" text-anchor="middle" class="d-tx">0x400 → 0x1000</text>
+            <text x="500" y="400" text-anchor="middle" class="d-ts ar">file offset = RVA − VirtualAddress + PointerToRawData        ·        VA = ImageBase + RVA</text>
+          </svg>
+          <figcaption>نفس الـ bytes، مكانين مختلفين: الـ <code>.text</code> عند offset <code>0x400</code> في الملف وعند RVA <code>0x1000</code> في الذاكرة. الـ disassembler بيعرض <b>VA</b> (<code>0x140001000</code>)، والـ hex editor بيعرض <b>file offset</b>. لازم تعرف تحوّل بينهم.</figcaption>
+        </figure>
+
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>المصطلح</th><th>المعنى</th><th>مثال (الملف تحت)</th></tr></thead>
+            <tbody>
+              <tr><td><b>File offset</b></td><td>مكان الـ byte في الملف على الـ disk</td><td><code>0x400</code> = أول byte في .text</td></tr>
+              <tr><td><b>RVA</b></td><td>Relative Virtual Address: المسافة من بداية الصورة في الذاكرة — ثابت مهما ASLR غيّر الـ base</td><td><code>0x1000</code></td></tr>
+              <tr><td><b>VA</b></td><td>العنوان الفعلي = ImageBase + RVA</td><td><code>0x140001000</code></td></tr>
+              <tr><td><b>ImageBase</b></td><td>العنوان المفضّل (ASLR بيغيّره)</td><td><code>0x140000000</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub">PE Explorer: ملف EXE حقيقي <span class="tag">تفاعلي</span></h3>
+        <p>ده ملف Windows x64 حقيقي (2560 byte) — نسخة من برنامج الـ WinAPI بتاع المرحلة 15 مع MessageBox. اتعمله link بـ MinGW. دوس على أي field تشوف الـ bytes بتوعه والمعنى، أو دوس على أي byte تعرف هو بتاع إيه. وجرّب المحوّل تحت: <code>0x140004080</code> أو <code>0x3000</code>.</p>
+        <div class="widget" data-widget="pe"><script type="text/plain" class="pe-data">TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAA4fug4AtAnNIbgBTM0hVGhpcyBwcm9ncmFtIGNhbm5vdCBiZSBydW4gaW4gRE9TIG1vZGUuDQ0KJAAAAAAAAABQRQAAZIYEAADxU2UAAAAAAAAAAPAALgILAgItAAIAAAAEAAAAAgAAABAAAAAQAAAAAABAAQAAAAAQAAAAAgAABAAAAAAAAAAFAAIAAAAAAABQAAAABAAAvXwAAAMAYAEAACAAAAAAAAAQAAAAAAAAAAAQAAAAAAAAEAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAQAAABAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcEAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAudGV4dAAAAJAAAAAAEAAAAAIAAAAEAAAAAAAAAAAAAAAAAAAgAABgLnJkYXRhAABgAAAAACAAAAACAAAABgAAAAAAAAAAAAAAAAAAQAAAQC5ic3MAAAAAEAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAMAuaWRhdGEAAAQBAAAAQAAAAAIAAAAIAAAAAAAAAAAAAAAAAABAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEiD7Ci59f////8VaTAAAEiJwUiNFecPAABBuBkAAABMjQ3aHwAASMdEJCAAAAAA/xVLMAAAMclIjRXnDwAATI0F1A8AAEG5QAAAAP8VPzAAADHJ/xUXMAAAkJCQkJCQkP8lGjAAAJCQ/yUKMAAAkJD/JfovAACQkA8fhAAAAAAA/yUKMAAAkJAPH4QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASGVsbG8gZnJvbSBXaW5kb3dzIHg2NCENCkFTTSBNYXN0ZXJ5AFBFIGV4cGxvcmVyIHNhbXBsZQAAAAAAAAAAAP//////////AAAAAAAAAAD//////////wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAQAAAAAAAAAAAAADkQAAAcEAAAGBAAAAAAAAAAAAAAPhAAACQQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoEAAAAAAAACuQAAAAAAAAL5AAAAAAAAAAAAAAAAAAADKQAAAAAAAAAAAAAAAAAAAoEAAAAAAAACuQAAAAAAAAL5AAAAAAAAAAAAAAAAAAADKQAAAAAAAAAAAAAAAAAAAfAFFeGl0UHJvY2VzcwAAA0dldFN0ZEhhbmRsZQAASAZXcml0ZUZpbGUAbwJNZXNzYWdlQm94QQAAQAAAAEAAAABAAABLRVJORUwzMi5kbGwAAAAAFEAAAFVTRVIzMi5kbGwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==</script></div>
+
+        <h3 class="sub">الـ Loader والـ IAT <span class="tag">ASM Explorer</span></h3>
+        <div class="explorer" data-scene="iat"></div>
+
+        <h3 class="sub">الـ Imports بتقول إيه؟</h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>المجموعة</th><th>APIs</th><th>الاحتمال</th></tr></thead>
+            <tbody>
+              <tr><td>💉 Injection</td><td><code>OpenProcess</code>، <code>VirtualAllocEx</code>، <code>WriteProcessMemory</code>، <code>CreateRemoteThread</code>، <code>NtUnmapViewOfSection</code>، <code>SetThreadContext</code>، <code>QueueUserAPC</code></td><td>process injection / hollowing</td></tr>
+              <tr><td>📌 Persistence</td><td><code>RegSetValueExW</code> (Run keys)، <code>CreateServiceW</code>، <code>CopyFileW</code> + startup folder</td><td>يفضل بعد الـ reboot</td></tr>
+              <tr><td>🌐 Network</td><td><code>WinHttpOpen</code>/<code>InternetOpenUrlA</code>، <code>WSAStartup</code> + <code>connect</code>/<code>send</code>، <code>URLDownloadToFileW</code></td><td>C2، تحميل payload</td></tr>
+              <tr><td>🔐 Crypto</td><td><code>CryptAcquireContext</code>، <code>CryptEncrypt</code>، <code>BCryptEncrypt</code></td><td>ransomware، تشفير الاتصال</td></tr>
+              <tr><td>🕵️ Spying</td><td><code>SetWindowsHookExW</code>، <code>GetAsyncKeyState</code>، <code>BitBlt</code>، <code>OpenClipboard</code></td><td>keylogger، screenshots</td></tr>
+              <tr><td>🛡️ Anti-analysis</td><td><code>IsDebuggerPresent</code>، <code>CheckRemoteDebuggerPresent</code>، <code>NtQueryInformationProcess</code>، <code>GetTickCount</code></td><td>مرحلة 24</td></tr>
+              <tr><td>🎭 Dynamic</td><td><code>LoadLibraryA</code> + <code>GetProcAddress</code> بس، وimports قليلة جدًا</td><td>بيخبّي الـ imports الحقيقية — دوّر على الـ strings/hashes (مرحلة 22)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">📤</div><h4>Exports</h4><p>الـ DLL بيصدّر دوال بالاسم أو بالرقم (<b>ordinal</b>). malware DLL ممكن يتشغّل بـ <code>rundll32 evil.dll,Start</code> ← الـ export ده هو الـ entry الحقيقي. و<b>forwarded exports</b> + DLL بنفس اسم DLL شرعي = <b>DLL side-loading/proxying</b>.</p></div>
+          <div class="card reveal"><div class="ico">🎁</div><h4>Resources والـ Overlay</h4><p><code>.rsrc</code> فيه الأيقونات والـ version info — وكتير payload متشفر (<code>FindResource</code> + <code>LoadResource</code> في الـ imports = شك). الـ <b>overlay</b> = بيانات بعد آخر section (installers، droppers، signatures).</p></div>
+          <div class="card reveal"><div class="ico">🧵</div><h4>TLS · Relocations · Exceptions</h4><p><b>TLS directory</b> = callbacks قبل الـ entry. <b>.reloc</b> = أماكن العناوين المطلقة (بيستخدمها الـ manual mapper في الـ malware). <b>.pdata</b> في x64 = بداية ونهاية كل دالة (بيساعد IDA يلاقي الدوال).</p></div>
+          <div class="card reveal"><div class="ico">🧾</div><h4>Rich header وDebug directory</h4><p>الـ <b>Rich header</b> (MSVC) = بصمة لإصدارات أدوات البناء — بيربط samples ببعض. الـ <b>Debug directory</b> فيه مسار الـ PDB: <code>C:\Users\dev\source\repos\stealer\Release\stealer.pdb</code> — حصلت كتير!</p></div>
+        </div>
+
+        <div class="callout mal"><span class="ci">📦</span><div><strong>علامات الـ Packing</strong><p>(1) entropy عالية (~7.9) في section. (2) section بـ RawSize صغير أو صفر وVirtualSize كبير (هيتفك فيه). (3) section صلاحياته <b>RWX</b>. (4) أسماء sections غريبة (<code>UPX0</code>، <code>.aspack</code>، أسماء عشوائية). (5) imports قليلة جدًا (LoadLibrary/GetProcAddress/VirtualAlloc). (6) entry point برا <code>.text</code>. (7) strings قليلة جدًا. الحل: <b>unpacking</b> — breakpoint على الـ OEP بعد الفك ثم dump + Scylla (المرحلة 24).</p></div></div>
+
+        <h3 class="sub">ELF في سطور (Linux)</h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>PE (Windows)</th><th>ELF (Linux)</th><th>ملاحظة</th></tr></thead>
+            <tbody>
+              <tr><td><code>MZ</code> … <code>PE\0\0</code></td><td><code>7F 45 4C 46</code> (<code>\x7FELF</code>)</td><td>الـ magic</td></tr>
+              <tr><td>AddressOfEntryPoint</td><td><code>e_entry</code></td><td>بيشاور على <code>_start</code></td></tr>
+              <tr><td>Section table (للـ loader)</td><td><b>Program headers</b> (segments: <code>LOAD</code> R-X / RW-)</td><td>الـ ELF loader بيستخدم الـ segments بس؛ الـ sections ممكن تتشال خالص</td></tr>
+              <tr><td>.text / .rdata / .data / .bss</td><td>.text / .rodata / .data / .bss</td><td></td></tr>
+              <tr><td>IAT + import thunks</td><td><b>.got</b> + <b>.plt</b> (lazy binding)</td><td><code>call puts@plt</code> ← <code>jmp [puts@GOT]</code> ← أول مرة بتروح للـ resolver</td></tr>
+              <tr><td>Exports</td><td><code>.dynsym</code></td><td></td></tr>
+              <tr><td>PE-bear / CFF Explorer</td><td><code>readelf -h -l -S</code>، <code>objdump</code>، <code>checksec</code></td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 20</h3></div>
+
+          <quiz id="s20-q1" answer="2">
+            <q>الـ disassembler بيقولك الـ string عند <code>0x140002019</code>. عايز تعدّلها بالـ hex editor. محتاج:</q>
+            <o>تروح لـ offset <code>0x140002019</code> في الملف</o>
+            <o>تروح لـ offset <code>0x2019</code></o>
+            <o>تحوّل لـ RVA (<code>0x2019</code>) وبعدين لـ file offset بالـ section table (<code>0x2019 − 0x2000 + 0x600 = 0x619</code>)</o>
+            <o>مينفعش تتعدل</o>
+            <good>VA → RVA (اطرح ImageBase) → file offset (بالـ section). جرّبها في المحوّل.</good>
+            <bad>VA ≠ RVA ≠ file offset.</bad>
+          </quiz>
+          <quiz id="s20-q2" answer="0">
+            <q>sample فيه section اسمه <code>.text</code> بس VirtualSize = <code>0x58000</code> وSizeOfRawData = <code>0</code> وصلاحياته RWX. ده غالبًا:</q>
+            <o>packer: الـ section فاضي على الـ disk وهيتملي بالكود المفكوك وقت التشغيل</o>
+            <o>ملف تالف</o>
+            <o>الـ .bss</o>
+            <o>debug build</o>
+            <good>UPX مثلًا: <code>UPX0</code> فاضي (RawSize 0) و<code>UPX1</code> فيه البيانات المضغوطة + الـ stub.</good>
+            <bad>RawSize = 0 معناه إيه؟</bad>
+          </quiz>
+          <quiz id="s20-q3" answer="3">
+            <q>الـ imports كلها: <code>LoadLibraryA</code>، <code>GetProcAddress</code>، <code>VirtualAlloc</code>، <code>ExitProcess</code>. الاستنتاج الأقوى؟</q>
+            <o>برنامج بسيط ومش ضار</o>
+            <o>برنامج .NET</o>
+            <o>driver</o>
+            <o>الـ APIs الحقيقية بتتحل وقت التشغيل (packed أو shellcode loader) — الـ imports مش بتقول القصة كاملة</o>
+            <good>دوّر على strings أسماء APIs أو hashes (مرحلة 22)، أو شغّله واعمل breakpoint على GetProcAddress تشوف بيطلب إيه.</good>
+            <bad>برنامج حقيقي بيستخدم APIs كتير — فين هما؟</bad>
+          </quiz>
+          <quiz id="s20-q4" answer="1">
+            <q>في dump للذاكرة، الـ IAT slot بتاع <code>CreateFileW</code> بيشاور على عنوان جوه heap مش جوه kernel32. ده:</q>
+            <o>طبيعي مع ASLR</o>
+            <o>IAT hook: حد (malware أو EDR) غيّر الـ slot لدالته</o>
+            <o>الدالة forwarded</o>
+            <o>bug في الـ dump</o>
+            <good>الـ slot السليم بيشاور جوه الـ DLL صاحبة الدالة (أو forward لـ DLL تانية). عنوان في heap/private memory = hook.</good>
+            <bad>شوف آخر خطوة في مشهد الـ IAT.</bad>
+          </quiz>
+          <quiz id="s20-q5" answer="2">
+            <q>في ELF: <code>call puts@plt</code>. الـ <code>.plt</code> entry بيعمل:</q>
+            <o>بينفذ puts جوه الملف</o>
+            <o>syscall مباشر</o>
+            <o><code>jmp [puts@GOT]</code> — أول مرة الـ GOT بيرجّعه للـ resolver اللي بيحل العنوان ويكتبه في الـ GOT (lazy binding)</o>
+            <o>بيحمّل libc</o>
+            <good>نفس فكرة الـ IAT + import thunks في الـ PE (اللي شفتها في الملف: <code>FF 25</code> jmp [IAT]).</good>
+            <bad>PLT/GOT = مقابل الـ IAT.</bad>
+          </quiz>
+
+          <lab-challenge id="s20-lc1" title="Parse الـ PE header بإيدك" level="3">
+            <desc>الـ malware (reflective loaders، والـ shellcode اللي بيدوّر على kernel32) بيقرا الـ PE headers من الذاكرة بنفسه. اكتب دالة: <code>rdi</code> = base لصورة PE في الذاكرة. اتأكد من <code>MZ</code> (<code>0x5A4D</code> كـ word)، اقرا <code>e_lfanew</code> من <code>[base+0x3C]</code>، اتأكد من التوقيع <code>PE\0\0</code> (<code>0x00004550</code> كـ dword)، ورجّع <code>NumberOfSections</code> (word عند <code>+6</code> من التوقيع) في <code>eax</code>. لو أي check فشل رجّع <code>-1</code>.</desc>
+            <starter>
+pe_num_sections:
+    mov eax, -1
+    ret
+</starter>
+            <solution>
+pe_num_sections:
+    cmp word [rdi], 0x5A4D          ; 'MZ'
+    jne .bad
+    mov eax, [rdi+0x3C]             ; e_lfanew
+    cmp dword [rdi+rax], 0x4550     ; 'PE\0\0'
+    jne .bad
+    movzx eax, word [rdi+rax+6]     ; FileHeader.NumberOfSections
+    ret
+.bad:
+    mov eax, -1
+    ret
+</solution>
+            <test setup="rdi=&bytes(4d 5a 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 40 00 00 00 50 45 00 00 64 86 05 00)" expect="eax=5" label="e_lfanew=0x40, 5 sections"/>
+            <test setup="rdi=&bytes(4d 5a 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 48 00 00 00 00 00 00 00 00 00 00 00 50 45 00 00 64 86 03 00)" expect="eax=3" label="e_lfanew=0x48, 3 sections"/>
+            <test setup="rdi=&bytes(4d 58 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 40 00 00 00 50 45 00 00 64 86 05 00)" expect="eax=-1" label="bad MZ"/>
+            <test setup="rdi=&bytes(4d 5a 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 40 00 00 00 50 45 01 00 64 86 05 00)" expect="eax=-1" label="bad PE signature"/>
+          </lab-challenge>
+
+          <re-task id="s20-re1" title="الـ Entry point كـ VA" level="1" answer="0x140001000" norm="hex">
+            <desc>من الـ PE Explorer: أول instruction هتتنفذ عند أنهي <b>VA</b>؟</desc>
+            <hint>ImageBase + AddressOfEntryPoint.</hint>
+            <explain>0x140000000 + 0x1000 = <b>0x140001000</b> (لو مفيش ASLR relocation).</explain>
+          </re-task>
+          <re-task id="s20-re2" title="الـ string في الملف" level="2" answer="0x619" norm="hex">
+            <desc>عنوان الـ MessageBox title (<code>"ASM Mastery"</code>) في الكود = <code>0x140002019</code>. هتلاقيه عند أنهي <b>file offset</b>؟</desc>
+            <hint>RVA 0x2019 في .rdata (VirtualAddress 0x2000، PointerToRawData 0x600).</hint>
+            <explain>0x2019 − 0x2000 + 0x600 = <b>0x619</b>. دوس على الـ byte ده في الـ hex view — هتلاقي <code>41 53 4D</code> = "ASM".</explain>
+          </re-task>
+          <re-task id="s20-re3" title="IAT slot بتاع WriteFile" level="2" answer="0x140004080" norm="hex">
+            <desc><code>call [rip+0x304B]</code> عند <code>0x14000102F</code> (طولها 6 bytes). بتقرا العنوان من أنهي VA؟ (وده slot أنهي دالة؟ اتأكد من الـ explorer.)</desc>
+            <hint>0x14000102F + 6 + 0x304B.</hint>
+            <explain>0x140001035 + 0x304B = <b>0x140004080</b> = IAT slot بتاع <code>WriteFile</code>.</explain>
+          </re-task>
+          <re-task id="s20-re4" title="سنة الـ build" level="1" answer="2023" norm="int">
+            <desc>الـ TimeDateStamp بتاع الملف بيقول إنه اتعمله link سنة كام؟</desc>
+            <hint>File Header › TimeDateStamp.</hint>
+            <explain><code>0x6553F100</code> = 2023-11-14 22:13:20 UTC. (اتظبط عمدًا في الملف ده — وده بالظبط ليه متثقش فيه 100% في الـ malware.)</explain>
+          </re-task>
+          <re-task id="s20-re5" title="تحويل في ملف تاني" level="2" answer="0x3B23" norm="hex">
+            <desc>ملف تاني: ImageBase = <code>0x140000000</code>. الـ section <code>.data</code>: VirtualAddress = <code>0x5000</code>، PointerToRawData = <code>0x3A00</code>. الـ key المشفر عند VA <code>0x140005123</code>. الـ file offset؟</desc>
+            <hint>اطرح ImageBase الأول.</hint>
+            <explain>RVA = 0x5123 ← 0x5123 − 0x5000 + 0x3A00 = <b>0x3B23</b>.</explain>
+          </re-task>
+        </div>
+      </section>

@@ -1,0 +1,240 @@
+      <section class="section" id="s18" data-part="الجزء 4 · الهندسة العكسية" data-nav="منهجية قراية الـ Disassembly" data-icon="🧭" data-keywords="methodology triage strings imports entry point _start __libc_start_main main mainCRTStartup WinMain DllMain xrefs top-down bottom-up rename annotate decompiler pitfalls ida ghidra x64dbg capa floss detect it easy config extractor red zone">
+        <div class="section-head">
+          <span class="section-index">18</span>
+          <div>
+            <p class="eyebrow">المرحلة الثامنة عشر · من الـ bytes للفهم</p>
+            <h2>منهجية قراية الـ Disassembly</h2>
+            <p class="lede">sample فيه 3000 دالة. لو قريتهم بالترتيب هتقعد شهر. الـ analyst المحترف عنده <b>منهجية</b>: يعرف يبدأ منين، يدوّر على إيه، يتجاهل إيه، وإزاي يحوّل الـ asm لفهم مكتوب (أسماء، types، تعليقات) خطوة خطوة. المرحلة دي هي الـ workflow ده — وهتطبقه على دالة حقيقية.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">الـ Workflow <span class="tag">7 خطوات</span></h3>
+        <div class="steps">
+          <div class="step"><span class="n">1</span><div><h4>Triage (من غير ما تفتح disassembler)</h4><p>نوع الملف، 32/64، الـ compiler/packer (Detect It Easy)، الـ hashes، الـ sections والـ entropy (entropy عالية ≈ مضغوط/متشفر)، الـ <b>imports</b>، والـ <b>strings</b> (و<b>FLOSS</b> للـ strings المتشفرة). <b>capa</b> بيقولك القدرات (injection، persistence…) ومكانها.</p></div></div>
+          <div class="step"><span class="n">2</span><div><h4>لاقي نقطة البداية الحقيقية</h4><p>الـ entry point مش main. وصّل لـ <code>main</code>/<code>WinMain</code>/<code>DllMain</code> (المشهد تحت)، وافتكر الكود اللي بيشتغل <b>قبل</b> main: constructors وTLS callbacks.</p></div></div>
+          <div class="step"><span class="n">3</span><div><h4>Bottom-up من الحاجات المثيرة</h4><p>بدل ما تقرا من فوق: خد import مهم (<code>InternetOpenUrlA</code>، <code>CreateRemoteThread</code>، <code>CryptDecrypt</code>) أو string غريبة ← <b>xrefs</b> (<kbd>X</kbd> في IDA) ← الدالة اللي بتستخدمها ← اطلع لفوق للـ callers.</p></div></div>
+          <div class="step"><span class="n">4</span><div><h4>Top-down من main</h4><p>اقرا main على مستوى الـ calls بس: كل call ← خمّن وظيفتها من الـ args والـ APIs اللي جواها، وسمّيها (<code>maybe_persist</code>). مش لازم تفهم كل دالة 100% من أول مرة.</p></div></div>
+          <div class="step"><span class="n">5</span><div><h4>Annotate بلا رحمة</h4><p>كل حاجة فهمتها اكتبها في الـ database: <b>rename</b> (<kbd>N</kbd>)، تعليقات (<kbd>;</kbd>)، <b>types وstructs</b> (أهم حاجة — الـ struct الصح بيخلّي الـ decompiler يطلع كود نضيف)، enums للثوابت.</p></div></div>
+          <div class="step"><span class="n">6</span><div><h4>اتأكد dynamically</h4><p>الـ static تخمين لحد ما يتثبت: breakpoint في x64dbg/gdb، شوف القيم الحقيقية (المفتاح، الـ string بعد الفك، الـ args). <b>في VM معزولة</b> من غير network حقيقية.</p></div></div>
+          <div class="step"><span class="n">7</span><div><h4>اكتب النتيجة</h4><p>الـ IOCs (domains، IPs، mutex، registry keys، hashes)، الـ capabilities، ووصف الخوارزميات (زي فك الـ config) — وأحسن حاجة: <b>config extractor</b> أو <b>YARA rule</b> يشتغلوا على samples تانية من نفس العيلة.</p></div></div>
+        </div>
+
+        <h3 class="sub">Triage: أول 10 دقايق</h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>بتبص على</th><th>بيقولك إيه</th><th>أداة</th></tr></thead>
+            <tbody>
+              <tr><td>الـ Imports</td><td>القدرات: network، files، registry، processes، crypto. imports قليلة جدًا (LoadLibrary + GetProcAddress بس) = resolving ديناميكي أو packer</td><td>PE-bear، CFF Explorer، IDA</td></tr>
+              <tr><td>الـ Strings</td><td>URLs، paths، أوامر، رسائل أخطاء، أسماء mutex، user-agents</td><td><code>strings</code>، FLOSS</td></tr>
+              <tr><td>الـ Sections</td><td>أسماء غريبة (<code>UPX0</code>، <code>.themida</code>)، section قابل للكتابة والتنفيذ، raw size = 0 وvirtual size كبير = unpacking</td><td>PE-bear، DIE</td></tr>
+              <tr><td>الـ Entropy</td><td>قريبة من 8 = مضغوط/متشفر (packed أو payload مخفي)</td><td>DIE، binwalk</td></tr>
+              <tr><td>الـ Compiler / Packer</td><td>MSVC؟ Go؟ .NET؟ UPX؟ — بيحدد الأدوات والطريقة</td><td>Detect It Easy</td></tr>
+              <tr><td>القدرات</td><td>rules جاهزة: «inject into process»، «encrypt data using AES»… مع العناوين</td><td>capa</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub">إزاي توصل لـ main <span class="tag">ASM Explorer</span></h3>
+        <div class="explorer" data-scene="startup"></div>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🪟</div><h4>MSVC console: main</h4><p><code>mainCRTStartup</code> ← <code>__scrt_common_main_seh</code>. دوّر جوه على call قبلها <code>__p___argv</code>/<code>__p___argc</code> وبعدها مباشرة <code>call exit</code> (أو <code>_cexit</code>): <code>mov ecx, [argc] / mov rdx, [argv] / mov r8, envp / call main</code> ثم <code>mov ecx, eax / call exit</code>.</p></div>
+          <div class="card reveal"><div class="ico">🖼️</div><h4>MSVC GUI: WinMain</h4><p>نفس الطريق، والـ call بتاخد 4 args: <code>rcx</code> = <code>__ImageBase</code> (غالبًا <code>0x140000000</code>)، <code>edx = 0</code>، <code>r8</code> = command line، <code>r9d</code> = show mode. اللي يشاور على الـ ImageBase كأول arg = WinMain.</p></div>
+          <div class="card reveal"><div class="ico">🧩</div><h4>DLL: DllMain</h4><p><code>_DllMainCRTStartup</code> ← <code>dllmain_dispatch</code> ← <code>DllMain(hinst, reason, reserved)</code>. الـ <code>edx</code> = السبب: <code>1</code> PROCESS_ATTACH (هنا الـ payload عادة)، <code>0</code> DETACH، <code>2/3</code> THREAD. لكن الـ malware DLL كتير بيشتغل من <b>export</b> (rundll32 بيناديه) — بص على جدول الـ exports.</p></div>
+          <div class="card reveal"><div class="ico">⏱️</div><h4>قبل main</h4><p>Linux: <code>.init_array</code> (constructors). Windows: <b>TLS callbacks</b> (بتشتغل قبل الـ entry point نفسه — مكان مفضّل للـ anti-debug) والـ C++ static initializers (<code>_initterm</code>). IDA بيعرض الـ TLS callbacks في قائمة الـ entry points (<kbd>Ctrl+E</kbd>).</p></div>
+        </div>
+
+        <h3 class="sub">تطبيق: حلّل دالة حقيقية <span class="tag">walkthrough تفاعلي</span></h3>
+        <p>الـ listing ده طالع من gcc 15 <code>-O2</code> بالظبط (من غير symbols غير اسم الدالة واسم الـ global). اتبع الـ passes بالترتيب — شوف إزاي التعليقات بتتراكم والـ C بيكبر، بالظبط زي ما بتعمل في IDA:</p>
+        <div class="widget" data-widget="walk"><script type="application/json">{"title": "تحليل دالة خطوة بخطوة: decrypt_config", "sub": "gcc -O2 حقيقي · 6 passes", "listing": "load_config:\n    xor     eax, eax\n    mov     edx, 60\n.L2:\n    movzx   ecx, BYTE PTR g_blob[rax]\n    xor     ecx, edx\n    mov     BYTE PTR [rsp-56+rax], cl\n    lea     ecx, [0+rdx*8]\n    add     rax, 1\n    sub     ecx, edx\n    lea     edx, [rcx+1]\n    cmp     rax, 40\n    jne     .L2\n    cmp     BYTE PTR [rsp-56], 67\n    jne     .L5\n    cmp     BYTE PTR [rsp-55], 70\n    jne     .L5\n    movdqu  xmm0, XMMWORD PTR [rsp-54]\n    movzx   eax, WORD PTR [rsp-22]\n    movups  XMMWORD PTR [rdi], xmm0\n    movdqu  xmm0, XMMWORD PTR [rsp-38]\n    mov     WORD PTR [rdi+32], ax\n    mov     eax, DWORD PTR [rsp-20]\n    movups  XMMWORD PTR [rdi+16], xmm0\n    mov     DWORD PTR [rdi+36], eax\n    xor     eax, eax\n    ret\n.L5:\n    mov     eax, -1\n    ret", "passes": [{"t": "الشكل العام", "hl": [], "d": "قبل أي تفاصيل، شوف <b>الشكل</b>: loop واحدة (4–13: الـ <code>jne .L2</code> بترجع لفوق = back edge)، بعدها مقارنتين (14–17) بيروحوا لنفس المكان <code>.L5</code>، كتلة نسخ (18–25)، ومخرجين: <code>return 0</code> و<code>return -1</code>. ده لوحده بيقولك: «حاجة بتتحسب، بتتفحص، ولو سليمة بتتنسخ».", "notes": {"4": "loop start", "13": "back edge → .L2", "15": "→ fail", "17": "→ fail", "26": "return 0", "29": "return -1"}, "c": "int load_config(?) {\n    loop { ... }\n    if (check1 || check2)\n        return -1;\n    copy ...;\n    return 0;\n}"}, {"t": "الـ arguments والـ locals", "hl": [[7], [14], [16], [18, 25]], "d": "<code>rdi</code> عمره ما اتقرا كقيمة — بيتكتب فيه بـ offsets 0 و16 و32 و36 ← <b>pointer لـ struct</b> (output parameter). ومفيش <code>sub rsp</code> خالص ومع ذلك فيه <code>[rsp-56]</code>: دي الـ <b>red zone</b> (الدالة leaf مبتناديش حد، فمسموحلها تستخدم الـ 128 byte اللي تحت rsp). الـ buffer من rsp-56 لحد rsp-17 = <b>40 byte</b>.", "notes": {"7": "buf[i]  (local @ rsp-56)", "20": "out+0", "24": "out+16", "22": "out+32", "25": "out+36"}, "c": "int load_config(struct config *out) {\n    unsigned char buf[40];   // [rsp-56], red zone\n    ...\n}"}, {"t": "الـ loop", "hl": [[2, 13]], "d": "<code>rax</code> بيبدأ 0 ويزيد 1 لحد 40 ← ده <code>i</code>. و<code>edx</code> بيبدأ <code>60 = 0x3C</code> ← المفتاح. السطور 5–7: <code>buf[i] = g_blob[i] ^ k</code> (اللي بيتخزن <code>cl</code> بس = byte). السطور 8 و10 و11 idiom ضرب: <code>ecx = k×8</code>، <code>ecx −= k</code> ← 7k، <code>edx = 7k + 1</code>. يعني <code>k = k*7 + 1</code>: <b>rolling key</b> بيتغير مع كل byte — XOR بمفتاح ثابت مكانش هيحتاج السطور دي.", "notes": {"2": "i = 0", "3": "k = 0x3C", "5": "g_blob[i]", "6": "^ k", "7": "buf[i] = …", "8": "ecx = k*8", "9": "i++", "10": "ecx = 7k", "11": "k = 7k + 1", "12": "i < 40"}, "c": "unsigned char k = 0x3C;\nfor (int i = 0; i < 40; i++) {\n    buf[i] = g_blob[i] ^ k;\n    k = k * 7 + 1;          // rolling key\n}"}, {"t": "الـ magic check", "hl": [[14, 17], [28, 30]], "d": "<code>67 = 'C'</code> و<code>70 = 'F'</code> — الـ disassembler بيعرضهم أرقام (في IDA اضغط <kbd>R</kbd>). الفشل في أي واحد ← <code>.L5</code> ← <code>return -1</code>. يعني الـ config المفكوك لازم يبدأ بـ <b>«CF»</b>: ده magic بيتأكد إن الفك نجح (والمفتاح صح).", "notes": {"14": "buf[0] == 'C' ?", "16": "buf[1] == 'F' ?", "29": "bad magic"}, "c": "if (buf[0] != 'C' || buf[1] != 'F')\n    return -1;"}, {"t": "بناء الـ struct", "hl": [[18, 25]], "d": "الـ compiler لخبط ترتيب الـ instructions (scheduling) — رتّبهم أنت بالـ offset: <code>rsp-54</code> = buf+2 ← 16 byte لـ out+0، و<code>rsp-38</code> = buf+18 ← 16 byte لـ out+16 (يعني 32 byte متصلين = string)، و<code>rsp-22</code> = buf+34 ← <b>word</b> لـ out+32، و<code>rsp-20</code> = buf+36 ← <b>dword</b> لـ out+36. الفجوة 34–35 جوه الـ struct = <b>padding</b> عشان الـ dword يبقى aligned على 4.", "notes": {"18": "buf+2  (16 B)", "21": "buf+18 (16 B)", "19": "buf+34 (2 B)", "23": "buf+36 (4 B)", "20": "→ out->host[0..15]", "24": "→ out->host[16..31]", "22": "→ out->port", "25": "→ out->sleep_ms"}, "c": "struct config {\n    char           host[32];   // +0\n    unsigned short port;       // +32\n    /* 2 bytes padding */\n    unsigned int   sleep_ms;   // +36\n};\nmemcpy(out->host, buf + 2, 32);\nout->port     = *(uint16_t *)(buf + 34);\nout->sleep_ms = *(uint32_t *)(buf + 36);"}, {"t": "التسمية والصورة الكاملة", "hl": [], "d": "سمّي الدالة <code>decrypt_config</code> والـ global <code>g_blob</code> = <code>enc_config</code>، وعرّف الـ struct في IDA (Local Types) وطبّقه على <code>rdi</code> — الـ decompiler هيطلع الكود ده تقريبًا. الخطوة الجاية: <b>xrefs</b> على الدالة (مين بيستخدم host/port؟ غالبًا دالة الاتصال)، وفك الـ 40 byte: بـ script (تحدي تحت) أو dynamic: breakpoint بعد السطر 13 واقرا <code>[rsp-56]</code>.", "notes": {}, "c": "struct config {\n    char           host[32];   // +0\n    unsigned short port;       // +32\n    unsigned int   sleep_ms;   // +36  (34..35 = padding)\n};\n\nint decrypt_config(struct config *out) {\n    unsigned char buf[40];\n    unsigned char k = 0x3C;\n    for (int i = 0; i < 40; i++) {\n        buf[i] = g_blob[i] ^ k;\n        k = k * 7 + 1;\n    }\n    if (buf[0] != 'C' || buf[1] != 'F')\n        return -1;\n    memcpy(out->host, buf + 2, 32);\n    out->port     = *(uint16_t *)(buf + 34);\n    out->sleep_ms = *(uint32_t *)(buf + 36);\n    return 0;\n}"}]}</script></div>
+
+        <p>ونفس الدالة من MSVC: الـ loop <b>اختفت خالص</b>. MSVC حسب الـ rolling key وقت الـ compile وفرد الـ 40 byte، كل واحد بمفتاحه: <code>xor al, 60</code> ثم <code>165</code> ثم <code>132</code>… نفس الخوارزمية، شكل مختلف تمامًا — لو مش واخد بالك هتفتكره XOR بمفتاح طويل عشوائي:</p>
+        <compiled file="cfg.c" targets="msvc-O2,gcc-O1" note="<b>MSVC</b>: الـ magic check بقى <code>xor al, 60 / cmp al, 67</code> و<code>xor al, 165 / cmp al, 70</code> (قبل ما ينسخ أي حاجة)، والـ host بيتفك byte byte مباشرة في <code>[rcx]</code> (الـ struct) من غير buffer وسيط. الـ keystream: 60، 165، 132، 157، 76، 21… = 0x3C، 0xA5، 0x84… — تقدر تتأكد إنها k = k×7+1. <b>gcc -O1</b>: نفس شكل الـ O2 تقريبًا بس النسخ أوضح (<code>sal eax, 8</code> + <code>or</code> = تجميع الـ port من byteين).">
+#include <string.h>
+
+struct config { char host[32]; unsigned short port; unsigned int sleep_ms; };
+
+extern const unsigned char g_blob[40];
+
+int load_config(struct config *out) {
+    unsigned char buf[40];
+    unsigned char k = 0x3C;
+    for (int i = 0; i < 40; i++) {
+        buf[i] = g_blob[i] ^ k;
+        k = k * 7 + 1;                     /* rolling key */
+    }
+    if (buf[0] != 'C' || buf[1] != 'F')    /* magic "CF" */
+        return -1;
+    memcpy(out->host, buf + 2, 32);
+    out->port = buf[34] | (buf[35] << 8);
+    memcpy(&out->sleep_ms, buf + 36, 4);
+    return 0;
+}
+</compiled>
+
+        <h3 class="sub">الـ Decompiler: صاحبك اللي بيكدب أحيانًا</h3>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🎭</div><h4>Types غلط</h4><p>من غير struct هيطلع <code>*(_WORD *)(a1 + 32)</code>. عرّف الـ struct وطبّقه ← <code>out-&gt;port</code>. والـ signed/unsigned بيتخمن من الـ jcc والـ shifts.</p></div>
+          <div class="card reveal"><div class="ico">🔢</div><h4>عدد الـ arguments</h4><p>لو دالة بتقرا register مبيتحطش (أو الـ convention غلط: <code>__thiscall</code>، <code>__fastcall</code>، syscall stub) الـ decompiler هيزوّد/ينقّص args. صحّح الـ prototype (<kbd>Y</kbd> في IDA).</p></div>
+          <div class="card reveal"><div class="ico">🌀</div><h4>Control flow مكسور</h4><p>jump tables مش متحللة، دوال noreturn مش متعرفة (الكود اللي بعد <code>exit</code> بيتلزق في الدالة)، opaque predicates، وكود متداخل. لو الـ decompiler قال حاجة غريبة ← ارجع للـ asm.</p></div>
+          <div class="card reveal"><div class="ico">🧹</div><h4>بيخفي التفاصيل المهمة</h4><p>الـ idioms اللي في المرحلة 17 بتتحوّل صح غالبًا، لكن حاجات زي <code>rdtsc</code>، <code>cpuid</code>، <code>int 2Dh</code>، <code>syscall</code> مباشر، أو تلاعب بالـ stack بتطلع <code>__asm</code> أو تختفي. الـ anti-analysis بيعيش في التفاصيل دي.</p></div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>الأداة</th><th>نوعها</th><th>ملاحظة</th></tr></thead>
+            <tbody>
+              <tr><td><b>IDA</b> (Free / Pro)</td><td>disassembler + decompiler</td><td>المعيار في الصناعة. Free فيه decompiler x64 cloud</td></tr>
+              <tr><td><b>Ghidra</b></td><td>disassembler + decompiler</td><td>مجاني ومفتوح (NSA)، scripting بـ Java/Python</td></tr>
+              <tr><td>Binary Ninja</td><td>disassembler + IL</td><td>API ممتاز للـ automation</td></tr>
+              <tr><td><b>x64dbg</b></td><td>debugger (Windows)</td><td>الأشهر في تحليل الـ malware على Windows + ScyllaHide</td></tr>
+              <tr><td>WinDbg</td><td>debugger (user + kernel)</td><td>للـ kernel والـ crash dumps</td></tr>
+              <tr><td>gdb + pwndbg/GEF</td><td>debugger (Linux)</td><td>ELF malware وCTFs</td></tr>
+              <tr><td>DIE · PE-bear · capa · FLOSS · YARA</td><td>triage</td><td>قبل الـ disassembler وبعده</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 18</h3></div>
+
+          <quiz id="s18-q1" answer="2">
+            <q>الـ entry point المكتوب في الـ ELF header لبرنامج C عادي بيشاور على:</q>
+            <o><code>main</code></o>
+            <o><code>__libc_start_main</code></o>
+            <o><code>_start</code> (كود الـ C runtime)</o>
+            <o>أول دالة في الملف</o>
+            <good>_start بيجهز ويبعت main لـ __libc_start_main. وفي Windows: mainCRTStartup.</good>
+            <bad>main محتاجة حد يجهز لها argc/argv الأول.</bad>
+          </quiz>
+          <quiz id="s18-q2" answer="0">
+            <q>sample فيه 2000 دالة من غير أسماء، والـ imports فيها <code>InternetOpenUrlA</code>. أسرع طريقة توصل لكود الاتصال؟</q>
+            <o>xrefs على الـ import ← الدالة اللي بتناديه ← الـ callers (bottom-up)</o>
+            <o>تقرا الدوال بالترتيب</o>
+            <o>تشغّله على جهازك</o>
+            <o>تدوّر على أطول دالة</o>
+            <good>الـ imports والـ strings هما الخيوط. شدّ الخيط لحد ما توصل للمنطق.</good>
+            <bad>فكّر في خطوة 3 من الـ workflow.</bad>
+          </quiz>
+          <quiz id="s18-q3" answer="3">
+            <q>دالة Linux leaf بتكتب في <code>[rsp-56]</code> من غير <code>sub rsp</code>. ده:</q>
+            <o>bug: هتكتب فوق بيانات</o>
+            <o>buffer overflow</o>
+            <o>anti-debug</o>
+            <o>طبيعي: الـ red zone (128 byte تحت rsp مضمونة للدالة اللي مبتناديش حد)</o>
+            <good>System V بس. على Windows x64 مفيش red zone — هتلاقي sub rsp دايمًا.</good>
+            <bad>مرحلة 10: الـ red zone.</bad>
+          </quiz>
+          <quiz id="s18-q4" answer="1">
+            <q>في الـ debugger الـ sample بيعمل exit قبل ما توصل لـ breakpoint على الـ entry point. مكان محتمل للكود اللي اشتغل:</q>
+            <o>main</o>
+            <o>TLS callback — بيشتغل قبل الـ entry point</o>
+            <o>الـ IAT</o>
+            <o>الـ Rich header</o>
+            <good>x64dbg عنده إعداد «Break on TLS callbacks» عشان كده بالظبط.</good>
+            <bad>إيه اللي بيشتغل قبل الـ entry point في PE؟</bad>
+          </quiz>
+          <quiz id="s18-q5" answer="2">
+            <q>الـ decompiler مطلّع <code>sub_401000(a1, a2, a3)</code> لكن الدالة بتستخدم <code>ecx</code> و<code>edx</code> بس ومفيهاش a3 خالص. أول حاجة تعملها؟</q>
+            <o>تتجاهل</o>
+            <o>تعيد التحليل من الأول</o>
+            <o>تصحّح الـ prototype (عدد/نوع الـ args والـ convention) — والـ callers هيتحسنوا كمان</o>
+            <o>تحذف الدالة</o>
+            <good>Prototype صح = decompilation صح للدالة ولكل اللي بينادوها.</good>
+            <bad>الـ decompiler بيخمّن — صحّحه.</bad>
+          </quiz>
+          <quiz id="s18-q6" answer="0">
+            <q>في walkthrough الـ decrypt_config، إيه اللي خلّاك تعرف إن المفتاح <b>rolling</b> مش ثابت؟</q>
+            <o>المفتاح (edx) بيتغير جوه الـ loop: <code>lea/sub/lea</code> = k×7+1</o>
+            <o>إن فيه XOR</o>
+            <o>إن الـ loop 40 لفة</o>
+            <o>الـ magic «CF»</o>
+            <good>أي register بيتعدل جوه loop فك التشفير غير الـ index = حالة متغيرة (key schedule).</good>
+            <bad>بص على السطور 8–11.</bad>
+          </quiz>
+
+          <challenge id="s18-c1" title="Config extractor" level="3" lang="c">
+            <desc>ده الـ <code>g_blob</code> الحقيقي من نفس الـ sample. اكتب extractor بـ C بيعمل نفس خوارزمية <code>decrypt_config</code> (k يبدأ 0x3C، و<code>k = k*7 + 1</code>)، يتأكد من الـ magic، ويطبع بالظبط:<br><code>host=cdn.update-check.example port=8443 sleep=30000</code></desc>
+            <starter>
+#include <stdio.h>
+#include <string.h>
+
+static const unsigned char g_blob[40] = {
+    0x7F, 0xE3, 0xE7, 0xF9, 0x22, 0x3B, 0xE1, 0x7D, 0x38, 0xE4, 0xD0, 0x18, 0x41, 0x96,
+    0xDC, 0x88, 0x1F, 0x0E, 0xEA, 0x38, 0xF4, 0xB4, 0xB9, 0xBD, 0xF0, 0x20, 0xE4, 0x3D,
+    0xAC, 0xB5, 0xF4, 0xAD, 0xBC, 0x25, 0xFF, 0x3D, 0xFC, 0xE0, 0x14, 0x8D
+};
+
+int main(void) {
+    unsigned char buf[40];
+    /* TODO: decrypt, check the magic, parse host / port / sleep_ms */
+    return 0;
+}
+</starter>
+            <expected>
+host=cdn.update-check.example port=8443 sleep=30000
+</expected>
+            <solution>
+#include <stdio.h>
+#include <string.h>
+
+static const unsigned char g_blob[40] = {
+    0x7F, 0xE3, 0xE7, 0xF9, 0x22, 0x3B, 0xE1, 0x7D, 0x38, 0xE4, 0xD0, 0x18, 0x41, 0x96,
+    0xDC, 0x88, 0x1F, 0x0E, 0xEA, 0x38, 0xF4, 0xB4, 0xB9, 0xBD, 0xF0, 0x20, 0xE4, 0x3D,
+    0xAC, 0xB5, 0xF4, 0xAD, 0xBC, 0x25, 0xFF, 0x3D, 0xFC, 0xE0, 0x14, 0x8D
+};
+
+int main(void) {
+    unsigned char buf[40];
+    unsigned char k = 0x3C;
+    for (int i = 0; i < 40; i++) {
+        buf[i] = g_blob[i] ^ k;
+        k = (unsigned char)(k * 7 + 1);
+    }
+    if (buf[0] != 'C' || buf[1] != 'F') {
+        puts("bad magic");
+        return 1;
+    }
+    char host[33] = {0};
+    memcpy(host, buf + 2, 32);
+    unsigned port = buf[34] | (buf[35] << 8);
+    unsigned sleep_ms = buf[36] | (buf[37] << 8) | (buf[38] << 16) | ((unsigned)buf[39] << 24);
+    printf("host=%s port=%u sleep=%u\n", host, port, sleep_ms);
+    return 0;
+}
+</solution>
+          </challenge>
+
+          <re-task id="s18-re1" title="فين main؟" level="1" answer="0x401347" norm="hex">
+            <desc>_start في binary متشال منه الـ symbols. عنوان main كام؟</desc>
+            <listing>
+401040:  endbr64
+401044:  xor   ebp, ebp
+401046:  mov   r9, rdx
+401049:  pop   rsi
+40104A:  mov   rdx, rsp
+40104D:  and   rsp, -16
+401051:  push  rax
+401052:  push  rsp
+401053:  xor   r8d, r8d
+401056:  xor   ecx, ecx
+401058:  lea   rdi, [rip+0x2E8]
+40105F:  call  qword ptr [rip+0x2F73]
+401065:  hlt
+</listing>
+            <hint>rip في lea = عنوان الـ instruction اللي <b>بعدها</b> (0x40105F).</hint>
+            <explain>0x40105F + 0x2E8 = <b>0x401347</b>. أول argument لـ <code>__libc_start_main</code> = main. (IDA بيحسبها لك ويكتب <code>lea rdi, main</code> لو لقى الـ symbol، أو <code>sub_401347</code> لو مفيش.)</explain>
+          </re-task>
+
+          <re-task id="s18-re2" title="ثاني byte في الـ keystream" level="1" answer="0xA5|165" norm="hex">
+            <desc>في decrypt_config: <code>k</code> بيبدأ <code>0x3C</code> وبعد كل byte: <code>k = k*7 + 1</code> (8-bit). قيمة <code>k</code> اللي بتفك <code>g_blob[1]</code>؟</desc>
+            <hint>0x3C × 7 = 0x1A4، +1، وخد أقل byte.</hint>
+            <explain>0x3C×7+1 = 0x1A5 ← 8-bit = <b>0xA5</b> = 165 — نفس الرقم اللي في <code>xor al, 165</code> عند <code>g_blob+1</code> في كود MSVC. لما تلاقي خوارزمية واتنين compilers طلعوا نفس الثوابت = اتأكدت من فهمك.</explain>
+          </re-task>
+
+          <re-task id="s18-re3" title="الـ C2" level="2" answer="cdn.update-check.example:8443" norm="text">
+            <desc>بعد ما تحل الـ Config extractor (أو تفك يدويًا): اكتب الـ C2 بالشكل <code>host:port</code>.</desc>
+            <hint>شغّل الحل بتاعك في التحدي اللي فوق.</hint>
+            <explain>الـ IOC: <code>cdn.update-check.example:8443</code>، والـ beacon interval = 30000 ms = 30 ثانية. الـ extractor ده بالظبط اللي بيتكتب في تقارير الـ malware عشان يشتغل على كل samples العيلة.</explain>
+          </re-task>
+        </div>
+      </section>

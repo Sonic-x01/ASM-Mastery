@@ -1,0 +1,211 @@
+      <section class="section" id="s19" data-part="الجزء 4 · الهندسة العكسية" data-nav="Machine Code والـ Patching" data-icon="🧬" data-keywords="machine code encoding opcode rex modrm sib displacement immediate relative jump rel8 rel32 patching nop jz jnz eb e9 e8 hook detour trampoline inline hook anti-disassembly desync int3 cc multi-byte nop">
+        <div class="section-head">
+          <span class="section-index">19</span>
+          <div>
+            <p class="eyebrow">المرحلة التاسعة عشر · تحت الـ mnemonics</p>
+            <h2>Machine Code والـ Patching</h2>
+            <p class="lede">الـ disassembler بيعرضلك <code>jz loc_401020</code>، لكن اللي في الملف فعلًا <code>74 0E</code>. لما تعرف تقرا وتكتب الـ bytes دي بإيدك هتقدر: تعمل <b>patch</b> للـ binary (تتخطى check، تشيل anti-debug)، تكتب <b>YARA</b> rules بالـ opcodes، تفهم الـ <b>hooks</b> والـ shellcode، وتكشف حيل الـ <b>anti-disassembly</b>.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">شكل الـ instruction <span class="tag">1 → 15 byte</span></h3>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 250" role="img" aria-label="x86-64 instruction format">
+            <text x="500" y="24" text-anchor="middle" class="d-ts">x86-64 instruction  (max 15 bytes)</text>
+            <rect x="20" y="40" width="150" height="60" rx="10" class="d-box3"/><text x="95" y="66" text-anchor="middle" class="d-tb">Prefixes</text><text x="95" y="87" text-anchor="middle" class="d-tx">0–4 · 66 F2 F3 F0 2E…</text>
+            <rect x="180" y="40" width="100" height="60" rx="10" class="d-box2"/><text x="230" y="66" text-anchor="middle" class="d-tb">REX</text><text x="230" y="87" text-anchor="middle" class="d-tx">0–1 · 40–4F</text>
+            <rect x="290" y="40" width="150" height="60" rx="10" class="d-box"/><text x="365" y="66" text-anchor="middle" class="d-tb">Opcode</text><text x="365" y="87" text-anchor="middle" class="d-tx">1–3 · 0F … 0F 38 …</text>
+            <rect x="450" y="40" width="110" height="60" rx="10" class="d-box4"/><text x="505" y="66" text-anchor="middle" class="d-tb">ModRM</text><text x="505" y="87" text-anchor="middle" class="d-tx">0–1</text>
+            <rect x="570" y="40" width="100" height="60" rx="10" class="d-box4"/><text x="620" y="66" text-anchor="middle" class="d-tb">SIB</text><text x="620" y="87" text-anchor="middle" class="d-tx">0–1</text>
+            <rect x="680" y="40" width="140" height="60" rx="10" class="d-box5"/><text x="750" y="66" text-anchor="middle" class="d-tb">Displacement</text><text x="750" y="87" text-anchor="middle" class="d-tx">0 / 1 / 4</text>
+            <rect x="830" y="40" width="150" height="60" rx="10" class="d-box5"/><text x="905" y="66" text-anchor="middle" class="d-tb">Immediate</text><text x="905" y="87" text-anchor="middle" class="d-tx">0 / 1 / 2 / 4 / 8</text>
+            <g class="d-ar"><path d="M230 104v30M365 104v30M505 104v30M620 104v30M750 104v30"/></g>
+            <text x="95" y="160" text-anchor="middle" class="d-tx">—</text>
+            <text x="230" y="160" text-anchor="middle" class="d-tb d-vio">48</text>
+            <text x="365" y="160" text-anchor="middle" class="d-tb d-acc">8B</text>
+            <text x="505" y="160" text-anchor="middle" class="d-tb d-grn">44</text>
+            <text x="620" y="160" text-anchor="middle" class="d-tb d-grn">CB</text>
+            <text x="750" y="160" text-anchor="middle" class="d-tb d-red">10</text>
+            <text x="905" y="160" text-anchor="middle" class="d-tx">—</text>
+            <text x="230" y="180" text-anchor="middle" class="d-tx">W=1</text>
+            <text x="365" y="180" text-anchor="middle" class="d-tx">MOV r, r/m</text>
+            <text x="505" y="180" text-anchor="middle" class="d-tx">01 000 100</text>
+            <text x="620" y="180" text-anchor="middle" class="d-tx">×8 rcx rbx</text>
+            <text x="750" y="180" text-anchor="middle" class="d-tx">+0x10</text>
+            <text x="500" y="226" text-anchor="middle" class="d-tb">mov rax, [rbx + rcx*8 + 0x10]</text>
+          </svg>
+          <figcaption>مش كل الأجزاء موجودة في كل instruction: <code>ret</code> = byte واحد (<code>C3</code>)، و<code>mov rax, 0x1122334455667788</code> = 10 bytes. الـ opcode هو اللي بيقرر محتاج ModRM وimmediate ولا لأ.</figcaption>
+        </figure>
+
+        <div class="widget" data-widget="encoder"></div>
+
+        <h3 class="sub">الـ CPU بيفك instruction <span class="tag">ASM Explorer</span></h3>
+        <div class="explorer" data-scene="decode"></div>
+
+        <h3 class="sub">الـ jumps والـ calls النسبية</h3>
+        <p>الـ <code>jmp</code>/<code>jcc</code>/<code>call</code> المباشرة مش بتخزن العنوان — بتخزن <b>المسافة</b> من <b>آخر الـ instruction</b> (يعني من عنوان الـ instruction اللي بعدها):</p>
+        <div class="callout info"><span class="ci">📐</span><div><strong>target = (عنوان الـ instruction + طولها) + rel</strong><p><code>401010: E8 1B 00 00 00</code> ← الـ instruction اللي بعدها عند <code>0x401015</code>، والـ rel = <code>0x1B</code> ← <code>call 0x401030</code>.<br><code>40102A: EB F4</code> ← بعدها <code>0x40102C</code>، والـ rel8 = <code>0xF4</code> = −12 ← <code>jmp 0x401020</code> (لورا = loop).<br>rel8 مداها −128…+127 (<code>EB</code>، <code>74</code>…)، وrel32 ±2GB (<code>E9</code>، <code>E8</code>، <code>0F 84</code>…). وعشان كده الكود بيشتغل في أي عنوان (position-independent).</p></div></div>
+
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>Bytes</th><th>Instruction</th><th>بتستخدمها في</th></tr></thead>
+            <tbody>
+              <tr><td><code>90</code></td><td><code>nop</code></td><td>مسح instruction (byte لكل byte)</td></tr>
+              <tr><td><code>66 90</code> · <code>0F 1F 00</code> · <code>0F 1F 40 00</code> · <code>0F 1F 44 00 00</code> · <code>66 0F 1F 44 00 00</code></td><td>NOP بطول 2…6</td><td>مسح instruction طويلة بـ instruction واحدة (أنضف في الـ disassembly)</td></tr>
+              <tr><td><code>EB rel8</code> / <code>E9 rel32</code></td><td><code>jmp</code> short / near</td><td>تحويل شرط لقفزة دايمة، hooks</td></tr>
+              <tr><td><code>E8 rel32</code></td><td><code>call</code></td><td>تحويل النداء لدالة تانية</td></tr>
+              <tr><td><code>74</code> / <code>75</code> (rel8) · <code>0F 84</code> / <code>0F 85</code> (rel32)</td><td><code>jz</code> / <code>jnz</code></td><td>قلب الشرط: آخر bit في الـ opcode</td></tr>
+              <tr><td><code>72 73 76 77 · 7C 7D 7E 7F</code></td><td><code>jb jae jbe ja · jl jge jle jg</code></td><td>كل زوج = شرط وعكسه (XOR 1)</td></tr>
+              <tr><td><code>C3</code> · <code>C2 iw</code></td><td><code>ret</code> · <code>ret n</code></td><td>إنهاء دالة فورًا</td></tr>
+              <tr><td><code>B8 imm32</code> · <code>31 C0</code> / <code>33 C0</code></td><td><code>mov eax, imm</code> · <code>xor eax, eax</code></td><td>تزوير القيمة الراجعة (لاحظ: نفس الـ instruction ليها encodingين)</td></tr>
+              <tr><td><code>CC</code> · <code>0F 0B</code></td><td><code>int3</code> · <code>ud2</code></td><td>breakpoints / crash متعمد</td></tr>
+              <tr><td><code>FF 15 rel32</code> · <code>FF 25 rel32</code></td><td><code>call [rip+x]</code> · <code>jmp [rip+x]</code></td><td>نداء API عن طريق الـ IAT / import thunk</td></tr>
+              <tr><td><code>0F 05</code> · <code>CD 80</code> · <code>0F 34</code></td><td><code>syscall</code> · <code>int 0x80</code> · <code>sysenter</code></td><td>دوّر عليهم في الـ shellcode والـ direct syscalls</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub">الـ Patching: 4 تقنيات أساسية</h3>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">🔁</div><h4>اقلب الشرط</h4><p><code>74 0E</code> (jz) ← <code>75 0E</code> (jnz). أسهل patch، بس خطر: كل الحالات اللي كانت صح هتبقى غلط. استخدمه لما تكون متأكد من الحالتين.</p></div>
+          <div class="card reveal"><div class="ico">➡️</div><h4>خلّي القفزة دايمة</h4><p><code>74 0E</code> ← <code>EB 0E</code>: القفزة دايمًا. أو NOP: <code>74 0E</code> ← <code>90 90</code>: القفزة مبتحصلش أبدًا. اختار حسب المسار اللي عايزه.</p></div>
+          <div class="card reveal"><div class="ico">↩️</div><h4>غيّر القيمة الراجعة</h4><p>في أول دالة <code>is_debugger_present</code> أو <code>check_license</code>: <code>B8 01 00 00 00 C3</code> (= <code>mov eax, 1 / ret</code>) أو <code>31 C0 C3</code> (= return 0). الدالة كلها بقت سطرين.</p></div>
+          <div class="card reveal"><div class="ico">📍</div><h4>في الملف ولا في الذاكرة؟</h4><p>في x64dbg: عدّل في الذاكرة، وبعدين <b>Patch file</b> (<kbd>Ctrl+P</kbd>) يكتبه في الملف. للتعديل اليدوي بالـ hex editor محتاج <b>file offset</b>: <code>offset = RVA − section.VirtualAddress + section.PointerToRawData</code> (مرحلة 20).</p></div>
+        </div>
+
+        <h3 class="sub">Inline Hooks: الـ E9 اللي في أول الدالة</h3>
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 270" role="img" aria-label="inline hook">
+            <defs><marker id="s19ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>
+            <rect x="24" y="40" width="290" height="150" rx="12" class="d-box"/>
+            <text x="40" y="64" class="d-tb">kernel32!CreateFileW</text>
+            <rect x="36" y="78" width="266" height="28" rx="6" class="d-box5"/><text x="46" y="97" class="d-t">E9 xx xx xx xx   jmp Detour</text>
+            <text x="46" y="128" class="d-ts">+5:  sub rsp, 0x58</text>
+            <text x="46" y="150" class="d-ts">+9:  …  (rest of the API)</text>
+            <rect x="370" y="40" width="260" height="110" rx="12" class="d-box2"/>
+            <text x="386" y="64" class="d-tb">Detour  (EDR / malware)</text>
+            <text x="386" y="92" class="d-ts">inspect / log / modify args</text>
+            <text x="386" y="114" class="d-ts">block?  else:</text>
+            <text x="386" y="136" class="d-t">jmp Trampoline</text>
+            <rect x="686" y="40" width="290" height="110" rx="12" class="d-box3"/>
+            <text x="702" y="64" class="d-tb">Trampoline</text>
+            <text x="702" y="92" class="d-t">48 89 5C 24 08</text>
+            <text x="702" y="112" class="d-tx">the 5 stolen original bytes: mov [rsp+8], rbx</text>
+            <text x="702" y="136" class="d-t">jmp CreateFileW+5</text>
+            <path d="M302 92 C 336 92, 336 92, 368 92" class="d-ar-amb" marker-end="url(#s19ah)"/>
+            <path d="M630 132 C 658 132, 658 132, 684 132" class="d-ar" marker-end="url(#s19ah)"/>
+            <path d="M830 150 C 830 240, 200 240, 180 132" class="d-ar-acc d-flow" marker-end="url(#s19ah)"/>
+            <text x="500" y="258" text-anchor="middle" class="d-ts ar">بعد الـ detour، الـ trampoline بينفذ الـ bytes الأصلية ويرجع يكمّل الدالة من +5</text>
+          </svg>
+          <figcaption>ده اللي بيعمله الـ <b>EDR</b> عشان يراقب الـ APIs، واللي بيعمله الـ <b>malware</b> عشان يسرق بيانات (banking trojans بيعملوا hook على دوال الـ browser) أو يخبّي نفسه (userland rootkits). في التحليل: لو أول byte في API = <code>E9</code> (أو <code>FF 25</code>) ← متعمله hook. والـ malware بيشيل hooks الـ EDR (<b>unhooking</b>: يقرا ntdll نضيفة من الـ disk) أو يتخطاها بالـ direct syscalls — مرحلة 22.</figcaption>
+        </figure>
+
+        <div class="callout danger"><span class="ci">⚠️</span><div><strong>Anti-disassembly: القفز لنص instruction</strong><p>بما إن الطول متغير، الـ malware ممكن يحط <code>jz +1</code> و<code>jnz +1</code> ورا بعض (= قفزة دايمة) لـ byte بعد <code>E8</code> مزيف — الـ disassembler الخطي هيقرا <code>E8</code> كـ call ويبلع الـ 4 bytes الجاية، والكود الحقيقي يتخفى. أو <code>EB FF</code>: jmp لنص نفسه! العلاج في IDA: <kbd>U</kbd> (undefine) على المكان ده، ثم <kbd>C</kbd> (code) من العنوان الصح، وممكن تعمل patch للـ byte الزيادة لـ <code>90</code> عشان الـ decompiler يرتاح.</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 19</h3></div>
+
+          <quiz id="s19-q1" answer="1">
+            <q>عايز تقلب <code>jl</code> short (<code>7C 12</code>) للشرط العكسي. الـ bytes الجديدة؟</q>
+            <o><code>7E 12</code></o>
+            <o><code>7D 12</code> (jge)</o>
+            <o><code>EB 12</code></o>
+            <o><code>7C ED</code></o>
+            <good>كل jcc وعكسه بيختلفوا في آخر bit: 7C (jl) ↔ 7D (jge). الـ rel مبيتغيرش.</good>
+            <bad>عكس «أقل من» هو «أكبر من أو يساوي».</bad>
+          </quiz>
+          <quiz id="s19-q2" answer="3">
+            <q>عايز تمسح <code>call check_debugger</code> (<code>E8 xx xx xx xx</code>) من غير ما الـ offsets بعدها تتحرك. أحسن حاجة:</q>
+            <o>تمسح الـ 5 bytes من الملف</o>
+            <o><code>C3</code> وبعدها 4 bytes زي ما هي</o>
+            <o><code>90</code> واحدة</o>
+            <o>5 bytes NOP (<code>90</code> × 5 أو <code>0F 1F 44 00 00</code>) — ونتأكد إن الكود بعدها مش معتمد على القيمة الراجعة في eax</o>
+            <good>عمرك ما تغيّر الحجم (كل الـ rel offsets والعناوين هتبوظ). وافتكر إن eax بعد الـ call كانت بتتستخدم — ممكن تحتاج <code>31 C0 90 90 90</code> (xor eax,eax + nops) بدلها.</good>
+            <bad>الحجم لازم يفضل زي ما هو.</bad>
+          </quiz>
+          <quiz id="s19-q3" answer="0">
+            <q>ليه الـ debugger بيقدر يحط breakpoint بـ byte واحد في أي مكان؟</q>
+            <o>لأن <code>int3</code> = <code>CC</code> byte واحد، فبيتكتب فوق أول byte من أي instruction من غير ما يبوّظ اللي جنبه</o>
+            <o>لأن الـ CPU عنده registers للـ breakpoints بس</o>
+            <o>لأن الـ instructions كلها byte واحد</o>
+            <o>لأن الـ debugger بيعيد compile البرنامج</o>
+            <good>ولما يوصل له: ينفّذ int3 ← exception ← الـ debugger يرجّع الـ byte الأصلي. وعشان كده الـ malware اللي بيعمل checksum على الكود بتاعه بيكتشف الـ breakpoints (والحل: hardware breakpoints في DR0–DR3).</good>
+            <bad>إيه أقصر instruction ممكنة تعمل exception؟</bad>
+          </quiz>
+          <quiz id="s19-q4" answer="2">
+            <q>أول bytes في <code>ntdll!NtReadVirtualMemory</code> في process معين: <code>E9 3B 7A 02 80</code>. ده معناه:</q>
+            <o>الدالة سليمة</o>
+            <o>syscall stub عادي</o>
+            <o>الدالة متعملها <b>inline hook</b> (غالبًا EDR أو malware)</o>
+            <o>الـ ntdll متشفرة</o>
+            <good>الـ stub الطبيعي في ntdll x64 بيبدأ بـ <code>4C 8B D1</code> (mov r10, rcx) ثم <code>B8 SSN</code>. الـ E9 = jmp لـ detour.</good>
+            <bad>E9 = ؟</bad>
+          </quiz>
+          <quiz id="s19-q5" answer="1">
+            <q><code>mov eax, 0x12345678</code> في الذاكرة:</q>
+            <o><code>B8 12 34 56 78</code></o>
+            <o><code>B8 78 56 34 12</code> — الـ immediate little-endian</o>
+            <o><code>48 B8 78 56 34 12</code></o>
+            <o><code>C7 C0 12 34 56 78</code></o>
+            <good>كل الأرقام جوه الـ instructions (displacements وimmediates) little-endian. ده مهم لما تكتب YARA rule أو تدوّر على ثابت بالـ hex.</good>
+            <bad>مرحلة 2: little-endian.</bad>
+          </quiz>
+
+          <lab-challenge id="s19-lc1" title="Crack الـ check" level="2" maxins="8">
+            <desc>الدالة دي بترجع 1 لو الـ key (في <code>edi</code>) صح. اعمل patch بـ <b>تغيير instruction واحدة بس</b> عشان ترجع 1 لأي key (من غير ما تبوّظ الـ key الصح). افتح المعمل 🔬 وبص على عمود الـ bytes: الـ patch بتاعك في الملف الحقيقي هيبقى byteين.</desc>
+            <starter>
+check_key:
+    mov eax, edi
+    xor eax, 0x5A5A
+    cmp eax, 0x1337
+    jne .bad
+    mov eax, 1
+    ret
+.bad:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+check_key:
+    mov eax, edi
+    xor eax, 0x5A5A
+    cmp eax, 0x1337
+    nop                 ; was: jne .bad  (75 xx -> 90 90 in the file)
+    mov eax, 1
+    ret
+.bad:
+    xor eax, eax
+    ret
+</solution>
+            <test setup="rdi=0" expect="eax=1" label="key = 0"/>
+            <test setup="rdi=12345" expect="eax=1" label="random key"/>
+            <test setup="rdi=0x496D" expect="eax=1" label="the real key"/>
+          </lab-challenge>
+
+          <re-task id="s19-re1" title="هدف الـ call" level="1" answer="0x401030" norm="hex">
+            <desc>عند <code>0x401010</code> فيه: <code>E8 1B 00 00 00</code>. الـ call رايحة لأنهي عنوان؟</desc>
+            <hint>next = 0x401010 + 5.</hint>
+            <explain>0x401015 + 0x1B = <b>0x401030</b>.</explain>
+          </re-task>
+          <re-task id="s19-re2" title="Short jump لورا" level="1" answer="0x401020" norm="hex">
+            <desc>عند <code>0x40102A</code>: <code>EB F4</code>. القفزة لفين؟</desc>
+            <hint>0xF4 كـ signed 8-bit = ؟</hint>
+            <explain>0xF4 = −12. ‏0x40102C − 12 = <b>0x401020</b>. jump لورا = غالبًا آخر loop.</explain>
+          </re-task>
+          <re-task id="s19-re3" title="خلّيها تقفز دايمًا" level="1" answer="EB 0E" norm="hex">
+            <desc>عند <code>0x401000</code>: <code>74 0E</code> (jz). اكتب الـ 2 bytes الجديدة اللي تخليها قفزة دايمة لنفس المكان.</desc>
+            <hint>jmp short = ؟، والمسافة مبتتغيرش لأن الطول واحد.</hint>
+            <explain><b>EB 0E</b>. الطول 2 في الحالتين فالـ rel نفسه بيوصل لنفس الـ target (0x401010).</explain>
+          </re-task>
+          <re-task id="s19-re4" title="return 1 بالـ bytes" level="2" answer="B8 01 00 00 00 C3" norm="hex">
+            <desc>اكتب الـ bytes بتاعة: <code>mov eax, 1</code> ثم <code>ret</code> (hex مفصول بمسافات).</desc>
+            <hint>B8 + imm32 little-endian، وret = byte واحد.</hint>
+            <explain><b>B8 01 00 00 00 C3</b> — 6 bytes. الـ patch الكلاسيكي في أول دالة check. (البديل الأقصر: <code>31 C0 FF C0 C3</code> = xor eax,eax / inc eax / ret = 5 bytes.)</explain>
+          </re-task>
+          <re-task id="s19-re5" title="jmp لنص نفسها" level="3" answer="inc eax" norm="text">
+            <desc>عند <code>0x401000</code>: <code>EB FF C0 48 …</code>. الـ CPU نفّذ الـ <code>EB FF</code>. أنهي instruction هتتنفذ بعدها؟ (اكتبها بالـ mnemonic)</desc>
+            <hint>EB FF = jmp −1 من 0x401002. والـ FF C0 = opcode FF مع ModRM C0 (mod=11، reg=000).</hint>
+            <explain>الهدف = 0x401002 − 1 = 0x401001: الـ CPU يقرا <code>FF C0</code> = <b>inc eax</b> (FF /0 = inc). الـ byte <code>FF</code> اتستخدم مرتين: مرة كـ rel8 ومرة كـ opcode — والـ disassembler الخطي هيعرض <code>jmp</code> وبعدها زبالة. حيلة anti-disassembly كلاسيكية.</explain>
+          </re-task>
+        </div>
+      </section>

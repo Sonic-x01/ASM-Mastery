@@ -1,0 +1,349 @@
+      <section class="section" id="s17" data-part="الجزء 4 · الهندسة العكسية" data-nav="أنماط الـ Compilers" data-icon="🏭" data-keywords="compiler optimization O0 O1 O2 O3 Os idioms lea strength reduction loop rotation unrolling vectorization cmov setcc branchless switch bit test compare tree tail call chkstk noreturn struct return hidden pointer fingerprint rich header detect it easy flirt endbr64">
+        <div class="section-head">
+          <span class="section-index">17</span>
+          <div>
+            <p class="eyebrow">المرحلة السابعة عشر · اقرا زي الـ compiler</p>
+            <h2>أنماط الـ Compilers: من الـ asm للـ C بسرعة</h2>
+            <p class="lede">أغلب الـ malware مكتوب بـ C/C++ ومتعمله compile بـ MSVC أو gcc أو clang. الـ compiler مش بيترجم سطر بسطر — ده بيعيد كتابة الكود كله. الـ reverser المحترف مش بيقرا instruction instruction؛ بيتعرف على <b>الأنماط</b> ويحوّل 10 أسطر asm لسطر C واحد في ثانية. المرحلة دي قاموس الأنماط دي.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">نفس الدالة × 5 مستويات optimization</h3>
+        <p>افتح كل tab وقارن. ده أهم تمرين في المرحلة: نفس الـ C بالظبط.</p>
+        <compiled file="loop_sum.c" targets="gcc-O0,gcc-O1,gcc-O2,gcc-Os,msvc-O2" graph note="<b>-O0</b>: كل متغير على الـ stack (<code>[rbp-8]</code> = s، <code>[rbp-16]</code> = i) وبيتقرا من الذاكرة كل مرة، والشرط في الآخر و<code>jmp</code> ليه في الأول — سهل جدًا تقراه. <b>-O1/-O2</b>: مفيش stack خالص، والـ i اختفى! بقى pointer بيزيد 4 (<b>strength reduction</b>) وبيتقارن بـ <code>rcx = &amp;a[n]</code> (end pointer)، وفيه <b>guard</b> (<code>test rsi, rsi / jle</code>) قبل loop على شكل do-while. <b>-Os</b>: أصغر حجم: الشرط فوق والـ index زي ما هو. <b>MSVC /O2</b>: لأن long = 32 bit عمل <b>vectorization</b>: <code>paddd</code> بيجمع 4 ints مرة واحدة في accumulatorين، وبعدين <code>psrldq</code> + <code>paddd</code> يجمع الـ lanes (horizontal sum)، وloop scalar مفرودة ×2 للباقي. كل ده = <code>for (i…) s += a[i]</code>.">
+long sum(const int *a, long n) {
+    long s = 0;
+    for (long i = 0; i < n; i++)
+        s += a[i];
+    return s;
+}
+</compiled>
+
+        <figure class="diagram reveal">
+          <svg viewBox="0 0 1000 380" role="img" aria-label="loop rotation">
+            <defs><marker id="s17ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>
+            <text x="250" y="28" text-anchor="middle" class="d-tb">gcc -O0</text>
+            <rect x="150" y="48" width="200" height="46" rx="9" class="d-box"/><text x="250" y="68" text-anchor="middle" class="d-t">i = 0</text><text x="250" y="86" text-anchor="middle" class="d-ts">jmp .L2</text>
+            <rect x="150" y="124" width="200" height="46" rx="9" class="d-box4"/><text x="250" y="144" text-anchor="middle" class="d-t">.L3:  s += a[i]</text><text x="250" y="162" text-anchor="middle" class="d-ts">i++</text>
+            <rect x="150" y="200" width="200" height="46" rx="9" class="d-box3"/><text x="250" y="220" text-anchor="middle" class="d-t">.L2:  cmp i, n</text><text x="250" y="238" text-anchor="middle" class="d-ts">jl .L3</text>
+            <rect x="150" y="290" width="200" height="38" rx="9" class="d-box2"/><text x="250" y="314" text-anchor="middle" class="d-t">return s</text>
+            <path d="M150 71 C 80 71, 80 223, 148 223" class="d-ar-amb" marker-end="url(#s17ah)"/><text x="70" y="152" text-anchor="middle" class="d-tx">jmp</text>
+            <path d="M250 170 V 198" class="d-ar" marker-end="url(#s17ah)"/>
+            <path d="M350 223 C 425 223, 425 147, 352 147" class="d-ar-acc d-flow" marker-end="url(#s17ah)"/><text x="436" y="190" class="d-tx">jl (back edge)</text>
+            <path d="M250 246 V 288" class="d-ar" marker-end="url(#s17ah)"/>
+
+            <line x1="500" y1="40" x2="500" y2="330" stroke="rgba(150,170,200,.18)" stroke-dasharray="4 5"/>
+
+            <text x="760" y="28" text-anchor="middle" class="d-tb">gcc -O2</text>
+            <rect x="650" y="48" width="220" height="46" rx="9" class="d-box"/><text x="760" y="68" text-anchor="middle" class="d-t">test rsi, rsi</text><text x="760" y="86" text-anchor="middle" class="d-ts">jle .ret   (guard)</text>
+            <rect x="650" y="128" width="220" height="86" rx="9" class="d-box4"/><text x="760" y="150" text-anchor="middle" class="d-t">.L3: movsx rdx, [rdi]</text><text x="760" y="172" text-anchor="middle" class="d-ts">add rdi, 4 · add rax, rdx</text><text x="760" y="196" text-anchor="middle" class="d-ts">cmp rdi, rcx · jne .L3</text>
+            <rect x="650" y="290" width="220" height="38" rx="9" class="d-box2"/><text x="760" y="314" text-anchor="middle" class="d-t">ret</text>
+            <path d="M760 94 V 126" class="d-ar" marker-end="url(#s17ah)"/>
+            <path d="M870 196 C 950 196, 950 150, 872 150" class="d-ar-acc d-flow" marker-end="url(#s17ah)"/><text x="958" y="178" class="d-tx">jne</text>
+            <path d="M760 214 V 288" class="d-ar" marker-end="url(#s17ah)"/>
+            <path d="M650 71 C 575 71, 575 309, 648 309" class="d-ar-amb" marker-end="url(#s17ah)"/><text x="566" y="196" text-anchor="middle" class="d-tx">n ≤ 0</text>
+            <text x="250" y="362" text-anchor="middle" class="d-ts ar">الشرط تحت والـ jmp بيوديك له الأول</text>
+            <text x="760" y="362" text-anchor="middle" class="d-ts ar">guard مرة واحدة + do-while (loop rotation)</text>
+          </svg>
+          <figcaption><b>Loop rotation</b>: الـ compiler بيحوّل <code>while</code>/<code>for</code> لـ <code>if (n &gt; 0) do { … } while (…)</code> عشان يبقى فيه jump واحد بس في كل لفة. لو شفت <b>شرط قبل الـ loop ونفس الشرط تقريبًا في آخرها</b> ← ده <code>for</code> عادي.</figcaption>
+        </figure>
+
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>التحويل</th><th>هتشوف إيه</th><th>ارجعه لـ</th></tr></thead>
+            <tbody>
+              <tr><td>Strength reduction</td><td><code>arr[i]</code> بقت pointer بيزيد <code>add rdi, 4</code></td><td>loop على index عادي</td></tr>
+              <tr><td>Unrolling</td><td>جسم الـ loop متكرر 2/4/8 مرات + loop صغيرة للباقي</td><td>loop واحدة</td></tr>
+              <tr><td>Vectorization</td><td><code>movdqu/paddd/pxor</code> + loop scalar للباقي</td><td>loop واحدة على bytes/ints</td></tr>
+              <tr><td>Inlining</td><td>دالة صغيرة اختفت، وكودها جوه الـ caller</td><td>call (مش هتلاقي اسمها)</td></tr>
+              <tr><td>Constant folding</td><td>حسابات وقت الـ compile: <code>mov eax, 21</code></td><td>تعبير ثابت</td></tr>
+              <tr><td>Tail call</td><td><code>jmp func</code> في آخر الدالة</td><td><code>return func(...)</code></td></tr>
+              <tr><td>Dead code elimination</td><td>كود مش موجود أصلًا</td><td>— (مش هتعرف بوجوده)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub">قاموس الـ Idioms <span class="tag">حفظ + تمرين</span></h3>
+        <compiled file="idioms.c" targets="gcc-O2,msvc-O2" note="ولا دالة فيهم فيها <code>imul</code> ولا <code>idiv</code> ولا jump تقريبًا! <b>mul5</b>: <code>lea [rdi+rdi*4]</code>. <b>div8 signed</b>: bias +7 للسالب قبل <code>sar</code> (gcc بـ cmovns، MSVC بـ cdq/and). <b>udiv8</b>: <code>shr</code> بس — الفرق بين shr وsar بيكشف الـ signedness. <b>mod8</b>: MSVC عمل حيلة <code>and ecx, 0x80000007</code> (يحتفظ بالـ sign bit مع الـ 3 bits). <b>iabs/imax</b>: cmov. <b>is_lower</b>: طرح + مقارنة unsigned واحدة. <b>is_pow2</b>: <code>lea eax, [rdi-1]</code> + <code>test eax, edi</code>.">
+int mul5(int x)   { return x * 5; }
+int mul12(int x)  { return x * 12; }
+int div8(int x)   { return x / 8; }       /* signed: needs a bias */
+unsigned udiv8(unsigned x) { return x / 8; }
+int mod8(int x)   { return x % 8; }
+int iabs(int x)   { return x < 0 ? -x : x; }
+int imax(int a, int b) { return a > b ? a : b; }
+int is_zero(long x) { return x == 0; }
+int is_lower(int c) { return c >= 'a' && c <= 'z'; }
+int is_pow2(unsigned x) { return x && !(x & (x - 1)); }
+</compiled>
+        <div class="widget" data-widget="idioms"></div>
+
+        <h3 class="sub">الـ switch: 4 أشكال <span class="tag">مش دايمًا jump table</span></h3>
+        <div class="grid-2">
+          <div class="card reveal"><div class="ico">📋</div><h4>Jump table</h4><p>الحالات قريبة من بعض (0,1,2…): <code>cmp</code> للحد + <code>jmp [table + i*8]</code>. شفناها في مرحلة 9 مع الـ Explorer.</p></div>
+          <div class="card reveal"><div class="ico">🌳</div><h4>شجرة مقارنات (binary search)</h4><p>الحالات متفرقة (200، 404، 500…): <code>cmp edi, 404 / jg …</code> بتقسم النطاق نصين. ارسمها كشجرة واجمع الثوابت.</p></div>
+          <div class="card reveal"><div class="ico">⛓️</div><h4>سلسلة sub (MSVC)</h4><p><code>sub ecx, 200 / je</code> ثم <code>sub ecx, 101 / je</code>… كل <code>sub</code> بيبني على اللي قبله: الحالات = <b>المجموع التراكمي</b> (200، 301…).</p></div>
+          <div class="card reveal"><div class="ico">🧮</div><h4>Bit-test</h4><p>حالات كتير بنفس النتيجة في نطاق صغير: <code>bt mask, x</code>. كل bit = 1 في الـ mask حالة. حوّل الـ mask لـ binary واقرا الـ bits.</p></div>
+        </div>
+        <compiled file="switches.c" targets="gcc-O2,msvc-O2" graph note="<b>is_vowel</b>: gcc: <code>mov edx, 1065233</code> = <code>0x104111</code> = bits 0، 4، 8، 14، 20 ← a، e، i، o، u (بعد <code>sub edi, 97</code>). MSVC: mask <code>0x4111</code> (a e i o) و'u' لوحدها بـ <code>cmp cl, 117</code>. <b>http_class</b>: gcc عمل شجرة حوالين 404، وMSVC عمل سلسلة sub: 200 → +101 = 301 → +103 = 404 → +96 = 500 → +837 = 1337. وكمان gcc حوّل <code>return 5</code> لـ <code>sete al</code> + <code>lea eax, [rax+rax*4]</code> (0 أو 5) من غير branch!">
+int is_vowel(char c) {
+    switch (c) {
+    case 'a': case 'e': case 'i': case 'o': case 'u': return 1;
+    default: return 0;
+    }
+}
+
+int http_class(int code) {
+    switch (code) {
+    case 200:  return 1;
+    case 301:  return 2;
+    case 404:  return 3;
+    case 500:  return 4;
+    case 1337: return 5;
+    default:   return 0;
+    }
+}
+</compiled>
+
+        <h3 class="sub">structs بالقيمة، frames كبيرة، ومسارات الخطأ</h3>
+        <compiled file="struct_ret.c" targets="gcc-O2,msvc-O2" note="<b>make_big</b> (32 byte): الـ caller بيبعت pointer مخفي في <code>rdi</code> (gcc) / <code>rcx</code> (MSVC) كأول argument، والدالة بتكتب فيه وترجعه في <code>rax</code> — فالـ x بقى في <code>rsi</code>/<code>rdx</code>. لو شفت دالة بتكتب في <code>[rcx+…]</code> وبتعمل <code>mov rax, rcx</code> في الآخر ← بترجع struct. <b>make_pair</b> (16 byte): gcc رجّعه في <code>rdx:rax</code>. MSVC: الـ long 4 bytes فالـ struct كله 8 bytes ورجع في rax (<code>shl rax, 32 / or</code>).">
+struct big  { long a, b, c, d; };
+struct pair { long a, b; };
+
+struct big make_big(long x)   { struct big r = { x, x + 1, x + 2, x + 3 }; return r; }
+struct pair make_pair(long x) { struct pair p = { x, x * 2 }; return p; }
+</compiled>
+        <compiled file="errpath.c" targets="gcc-O2,msvc-O2" note="<b>big_frame</b>: MSVC بينادي <code>__chkstk</code> قبل ما يحجز 8248 byte (أكبر من صفحة) عشان يلمس الـ stack صفحة صفحة. <b>checked_div</b>: الـ compiler حط المسار النادر (الخطأ) <b>في آخر الدالة</b> والمسار الطبيعي متصل — في الـ graph هتلاقي الـ error block متعلق على جنب. gcc غيّر <code>fputs</code> لـ <code>fwrite(…, 1, 17, stderr)</code> (عارف طول الـ string)، وMSVC جاب stderr بـ <code>__acrt_iob_func(2)</code> وحط <code>int 3</code> بعد <code>abort</code> لأنها مبترجعش.">
+#include <stdio.h>
+#include <stdlib.h>
+
+void use(char *p);
+void big_frame(void) { char buf[8192]; use(buf); }
+
+int checked_div(int a, int b) {
+    if (b == 0) {
+        fputs("division by zero\n", stderr);
+        abort();                       /* noreturn */
+    }
+    return a / b;
+}
+</compiled>
+
+        <h3 class="sub">بصمة الـ Compiler: مين اللي بنى الـ binary ده؟</h3>
+        <div class="table-wrap">
+          <table class="ref">
+            <thead><tr><th>العلامة</th><th>MSVC</th><th>gcc / clang</th></tr></thead>
+            <tbody>
+              <tr><td>الحشو بين الدوال</td><td><code>CC CC CC</code> (int3)</td><td><code>nop WORD PTR cs:[rax+rax*1+0x0]</code> (multi-byte nop)</td></tr>
+              <tr><td>الـ stack canary</td><td><code>__security_cookie</code> / <code>__security_check_cookie</code></td><td><code>fs:0x28</code> / <code>__stack_chk_fail</code></td></tr>
+              <tr><td>frame كبير</td><td><code>call __chkstk</code></td><td><code>sub rsp</code> مباشرة (أو probes مع <code>-fstack-clash-protection</code>)</td></tr>
+              <tr><td>حفظ الـ registers</td><td>في الـ home space: <code>mov [rsp+8], rbx</code></td><td><code>push rbx</code></td></tr>
+              <tr><td>بداية الدالة</td><td>—</td><td><code>endbr64</code> (لو CET مفعّل)</td></tr>
+              <tr><td>metadata في الملف</td><td><b>Rich header</b> في الـ PE (إصدارات أدوات MSVC)</td><td>section <code>.comment</code>: <code>GCC: (Ubuntu …) 13.2.0</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout re"><span class="ci">🔬</span><div><strong>متضيعش وقتك في كود المكتبات</strong><p>الـ samples المربوطة static فيها آلاف الدوال من الـ CRT (memcpy، printf، malloc). IDA بيتعرف عليها بـ <b>FLIRT signatures</b> (وLumina)، وGhidra بـ <b>Function ID</b>، وأداة <b>Detect It Easy</b> بتقولك الـ compiler والـ packer قبل ما تفتح الملف. القاعدة: ابدأ من <code>main</code>/<code>WinMain</code>/<code>DllMain</code> ومن الـ strings والـ imports المهمة، مش من أول دالة في الملف.</p></div></div>
+
+        <div class="callout tip"><span class="ci">💡</span><div><strong>طريقة القراية: Pattern → اسم → Collapse</strong><p>(1) <b>اعزل الـ blocks</b> (الـ graph بيساعدك). (2) لكل block اسأل: ده idiom معروف؟ (loop، range check، bit test، struct copy…). (3) <b>سمّيه</b> في IDA (rename/comment) — <code>is_lower</code>، <code>xor_decrypt</code>. (4) اطوي التفاصيل ومتقراهاش تاني. الـ decompiler بيعمل جزء كبير من ده، بس هو اللي بيغلط في الـ idioms النادرة — وعشان كده لازم تقرا الـ asm بنفسك.</p></div></div>
+
+        <div class="exercises">
+          <div class="exercises-head"><h3><span class="bulb">✏️</span> تمارين المرحلة 17</h3></div>
+
+          <quiz id="s17-q1" answer="1">
+            <q>إزاي تعرف إن الكود متعمله compile بـ <code>-O0</code>؟</q>
+            <o>فيه vectorization</o>
+            <o>كل متغير محلي ليه مكان على الـ stack (<code>[rbp-…]</code>) وبيتقرا ويتكتب منه في كل استخدام</o>
+            <o>مفيش <code>push rbp</code></o>
+            <o>كل الدوال inline</o>
+            <good>-O0 بيترجم سطر بسطر: load من الـ stack، عملية، store للـ stack. ممل بس سهل جدًا.</good>
+            <bad>فكّر في الـ tab بتاع gcc-O0 فوق.</bad>
+          </quiz>
+          <quiz id="s17-q2" answer="3">
+            <q><code>lea eax, [rdi+rdi*8]</code> بتحسب:</q>
+            <o>rdi + 8</o>
+            <o>عنوان في الذاكرة</o>
+            <o>rdi × 8</o>
+            <o>x × 9</o>
+            <good>x + x×8 = 9x. الـ scale بيبقى 1/2/4/8، فـ lea بتعمل ×2، ×3، ×4، ×5، ×8، ×9 في instruction واحدة.</good>
+            <bad>base + index×scale…</bad>
+          </quiz>
+          <quiz id="s17-q3" answer="0">
+            <q>دالة فيها <code>sar eax, 4</code> ودالة تانية فيها <code>shr eax, 4</code> (الاتنين قسمة على 16). نستنتج إيه؟</q>
+            <o>الأولى على signed (ومحتاجة bias للسالب قبلها)، والتانية على unsigned</o>
+            <o>الاتنين نفس الشيء</o>
+            <o>الأولى أسرع</o>
+            <o>الأولى 64-bit</o>
+            <good>نوع الـ shift = نوع المتغير. ده من أهم مصادر معلومات الـ types وانت بتعمل reverse.</good>
+            <bad>sar = arithmetic (بيحافظ على الإشارة)، shr = logical.</bad>
+          </quiz>
+          <quiz id="s17-q4" answer="2">
+            <q>في آخر دالة: <code>add rsp, 40</code> ثم <code>jmp send_report</code> (مش call). ده:</q>
+            <o>bug</o>
+            <o>loop</o>
+            <o>tail call: <code>return send_report(…)</code></o>
+            <o>exception</o>
+            <good>الدالة نضّفت الـ frame بتاعها وقفزت. send_report هترجع مباشرة للـ caller الأصلي.</good>
+            <bad>jmp لدالة تانية بعد تنظيف الـ stack…</bad>
+          </quiz>
+          <quiz id="s17-q5" answer="1">
+            <q><code>cmp ecx, edx</code> ثم <code>cmovb eax, ecx</code>. نوع المتغيرات؟</q>
+            <o>signed int</o>
+            <o>unsigned (b = below)</o>
+            <o>float</o>
+            <o>pointer بالضرورة</o>
+            <good>a/b/ae/be = unsigned (أو pointers)، g/l/ge/le = signed. نفس قاعدة الـ jcc بالظبط.</good>
+            <bad>below ولا less؟</bad>
+          </quiz>
+          <quiz id="s17-q6" answer="2">
+            <q>فيه <code>mov eax, 10040h</code> ثم <code>call __chkstk</code> ثم <code>sub rsp, rax</code>. ده معناه:</q>
+            <o>anti-debug</o>
+            <o>الدالة recursive</o>
+            <o>الدالة عندها متغيرات محلية كبيرة (~64KB) — غالبًا buffer (زي buffer للملفات أو للـ network)</o>
+            <o>heap allocation</o>
+            <good>__chkstk = frame أكبر من 4KB على Windows. الحجم نفسه معلومة: buffer 64KB في دالة network = غالبًا buffer الاستقبال.</good>
+            <bad>__chkstk بتظهر لما الـ frame يعدّي صفحة.</bad>
+          </quiz>
+
+          <lab-challenge id="s17-lc1" title="is_digit بمقارنة واحدة" level="2" forbid="jcc,jmp,cmov" maxins="5">
+            <desc>رجّع في <code>eax</code> = 1 لو <code>edi</code> بين <code>'0'</code> و<code>'9'</code>، وإلا 0. <b>من غير jumps ولا cmov</b>، ومقارنة واحدة بس (حيلة الطرح + unsigned). (انتبه: <code>setcc</code> بتكتب في <code>al</code> بس — صفّر <code>eax</code> قبلها.)</desc>
+            <starter>
+is_digit:
+    xor eax, eax
+    ret
+</starter>
+            <solution>
+is_digit:
+    lea ecx, [rdi-'0']      ; c - '0'
+    xor eax, eax            ; clear BEFORE setcc (xor changes flags!)
+    cmp ecx, 9              ; unsigned: 0..9 inside, everything else huge
+    setbe al
+    ret
+</solution>
+            <test setup="rdi=48" expect="eax=1" label="'0'"/>
+            <test setup="rdi=57" expect="eax=1" label="'9'"/>
+            <test setup="rdi=47" expect="eax=0" label="'/'"/>
+            <test setup="rdi=58" expect="eax=0" label="':'"/>
+            <test setup="rdi=97" expect="eax=0" label="'a'"/>
+            <test setup="rdi=0" expect="eax=0"/>
+          </lab-challenge>
+
+          <lab-challenge id="s17-lc2" title="قسمة signed على 16 من غير div" level="3" forbid="div,idiv,imul,mul" maxins="6">
+            <desc>رجّع <code>x / 16</code> بقواعد C (التقريب <b>ناحية الصفر</b>: ‎-100/16 = ‎-6) في <code>eax</code>، و<code>x</code> في <code>edi</code> (int). ممنوع div/idiv/mul/imul. (الـ <code>sar</code> لوحدها هتدّي ‎-7 للـ ‎-100 — محتاج الـ bias.)</desc>
+            <starter>
+div16:
+    mov eax, edi
+    sar eax, 4
+    ret
+</starter>
+            <solution>
+div16:
+    mov eax, edi
+    cdq                     ; edx = 0 or -1
+    and edx, 15             ; bias = 15 for negatives
+    add eax, edx
+    sar eax, 4
+    ret
+</solution>
+            <test setup="rdi=100" expect="eax=6"/>
+            <test setup="rdi=-100" expect="eax=-6"/>
+            <test setup="rdi=-1" expect="eax=0"/>
+            <test setup="rdi=-16" expect="eax=-1"/>
+            <test setup="rdi=-17" expect="eax=-1"/>
+            <test setup="rdi=0x7fffffff" expect="eax=0x7ffffff"/>
+          </lab-challenge>
+
+          <lab-challenge id="s17-lc3" title="clamp(x, 0, 255) من غير jumps" level="3" forbid="jcc,jmp" maxins="7">
+            <desc>رجّع <code>edi</code> (signed int) محصور بين 0 و255: أقل من 0 ← 0، أكبر من 255 ← 255 (زي معالجة الـ pixels). استخدم <code>cmov</code>.</desc>
+            <starter>
+clamp255:
+    mov eax, edi
+    ret
+</starter>
+            <solution>
+clamp255:
+    xor eax, eax
+    test edi, edi
+    cmovns eax, edi         ; eax = max(x, 0)
+    mov ecx, 255
+    cmp eax, ecx
+    cmovg eax, ecx          ; eax = min(eax, 255)
+    ret
+</solution>
+            <test setup="rdi=-5" expect="eax=0"/>
+            <test setup="rdi=0" expect="eax=0"/>
+            <test setup="rdi=128" expect="eax=128"/>
+            <test setup="rdi=255" expect="eax=255"/>
+            <test setup="rdi=256" expect="eax=255"/>
+            <test setup="rdi=-2147483648" expect="eax=0"/>
+          </lab-challenge>
+
+          <re-task id="s17-re1" title="سلسلة الـ sub" level="2" answer="1337" norm="int" entry="http_class">
+            <desc>الدالة دي (MSVC style، الـ argument في <code>ecx</code>). أنهي قيمة لـ <code>ecx</code> بترجّع <code>5</code>؟</desc>
+            <listing>
+http_class:
+    sub ecx, 200
+    je .r1
+    sub ecx, 101
+    je .r2
+    sub ecx, 103
+    je .r3
+    sub ecx, 96
+    je .r4
+    cmp ecx, 837
+    je .r5
+    xor eax, eax
+    ret
+.r5: mov eax, 5
+    ret
+.r4: mov eax, 4
+    ret
+.r3: mov eax, 3
+    ret
+.r2: mov eax, 2
+    ret
+.r1: mov eax, 1
+    ret
+</listing>
+            <verify setup="rcx={ans}" expect="eax=5"/>
+            <hint>كل sub بيطرح من الناتج اللي قبله. القيم اللي بتوصل لكل je: 200، 200+101…</hint>
+            <explain>200 + 101 + 103 + 96 + 837 = <b>1337</b>. الحالات كلها: 200، 301، 404، 500، 1337. IDA ساعات بيطلع الـ switch ده صح في الـ decompiler وساعات يطلعه if/else متداخلة — في الحالتين اجمع تراكمي.</explain>
+          </re-task>
+
+          <re-task id="s17-re2" title="فك الـ bit mask" level="2" answer="dhkrw" norm="str">
+            <desc>دالة بتتعامل مع أوامر حرف واحد من الـ C2. بترجع 1 لأنهي حروف؟ اكتبهم مرتبين أبجديًا من غير مسافات (مثلًا <code>abc</code>).</desc>
+            <listing>
+is_cmd:
+    sub edi, 'a'
+    cmp edi, 25
+    ja .no
+    mov eax, 0x420488
+    bt eax, edi
+    setc al
+    movzx eax, al
+    ret
+.no:
+    xor eax, eax
+    ret
+</listing>
+            <hint>0x420488 بالـ binary: 0100 0010 0000 0100 1000 1000. رقّم الـ bits من اليمين (bit 0 = 'a').</hint>
+            <explain>0x420488 = bits 3، 7، 10، 17، 22 ← 'a'+3 = d، +7 = h، +10 = k، +17 = r، +22 = w ← <b>dhkrw</b>. (ممكن تعمل verify في المعمل: جرّب كل حرف.) الأوامر اللي بحرف واحد في الـ backdoors شائعة: d = download، k = kill، r = run…</explain>
+          </re-task>
+
+          <re-task id="s17-re3" title="باقي القسمة على كام؟" level="2" answer="16" norm="int">
+            <desc>الكود ده بيحسب <code>x % N</code> (signed int في <code>edi</code>). قيمة <code>N</code>؟</desc>
+            <listing>
+mod_n:
+    mov edx, edi
+    sar edx, 31
+    shr edx, 28
+    lea eax, [rdi+rdx]
+    and eax, 15
+    sub eax, edx
+    ret
+</listing>
+            <hint>and eax, 15 = and مع N−1، والـ bias (shr 28) = 15 للسالب.</hint>
+            <explain><code>and 15</code> ⇐ N = <b>16</b>. الـ <code>sar 31 / shr 28</code> بيعمل bias = 15 لو x سالب و0 لو موجب، فالنتيجة بتطلع بإشارة x زي C (‎-37 % 16 = ‎-5).</explain>
+          </re-task>
+        </div>
+      </section>
